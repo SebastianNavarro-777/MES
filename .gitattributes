@@ -1,0 +1,22 @@
+# Default: let git auto-detect text/binary.
+* text=auto
+
+# Shell scripts MUST keep LF endings on every platform; otherwise the
+# shebang `#!/usr/bin/env bash` becomes `#!/usr/bin/env bash\r` on Mac/Linux
+# checkouts and bash refuses to run them.
+*.sh text eol=lf
+*.bash text eol=lf
+
+# Python source: LF for consistency with ruff/black conventions.
+*.py text eol=lf
+
+# Lockfiles: LF.
+uv.lock text eol=lf
+pnpm-lock.yaml text eol=lf
+
+# Binary assets (no munging).
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+*.pdf binary
