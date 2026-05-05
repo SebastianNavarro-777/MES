@@ -1,0 +1,73 @@
+---
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint (ruff + mypy + architecture)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Pin Python 3.12
+        run: uv python install 3.12
+
+      - name: Sync dev environment
+        run: uv sync --extra dev --frozen
+
+      - name: ruff check
+        run: uv run ruff check .
+
+      - name: mypy --strict
+        run: uv run mypy --strict
+
+      - name: Architecture linter
+        run: uv run python tools/linters/architecture.py
+
+  test:
+    name: Test (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Pin Python 3.12
+        run: uv python install 3.12
+
+      - name: Sync dev environment
+        run: uv sync --extra dev --frozen
+
+      - name: pytest
+        run: uv run pytest -q
+
+  build:
+    name: Build (placeholder)
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    steps:
+      # Docker images for the Django app and the React bundle will be built
+      # here once the first MES Worker delivers the deploy story (see
+      # tools/orchestrator/seed/initial_tickets.py, story 9). For now this
+      # job exists so branch protection can require it without yet enforcing
+      # any output.
+      - name: Placeholder
+        run: echo "Build placeholder; see seed ticket 9 for next steps."

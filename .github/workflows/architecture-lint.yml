@@ -1,0 +1,38 @@
+---
+name: Architecture Lint
+
+# Runs the layer-rules linter as a dedicated workflow so branch protection
+# can require it as a status check. The same linter also runs inside ci.yml's
+# lint job; this duplication is intentional — it keeps the architecture
+# enforcement visible as its own check on every PR.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  arch-lint:
+    name: tools/linters/architecture.py
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Pin Python 3.12
+        run: uv python install 3.12
+
+      - name: Sync minimal environment
+        run: uv sync --frozen
+
+      - name: Architecture linter
+        run: uv run python tools/linters/architecture.py
