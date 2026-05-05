@@ -19,6 +19,11 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+# Force UTF-8 stdout so the Spanish accents in the dry-run print correctly
+# on Windows cp1252 consoles. Linear itself accepts UTF-8 always.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
+
 from tools.orchestrator.orchestrator.config import Settings  # noqa: E402
 from tools.orchestrator.orchestrator.linear_client import LinearClient  # noqa: E402
 
@@ -34,7 +39,7 @@ class SeedTicket:
 # are intentionally short — Spec Writer enriches each Story when picked.
 SEEDS: list[SeedTicket] = [
     SeedTicket(
-        title="MES Fase 1 -- Nucleo de ordenes",
+        title="MES Fase 1 — Núcleo de órdenes",
         description=(
             "Epic that bundles the first eight Stories of phase 1: a working "
             "vertical slice from order creation in the UI to status changes "
@@ -57,27 +62,27 @@ SEEDS: list[SeedTicket] = [
         ),
     ),
     SeedTicket(
-        title="Endpoint REST: crear orden de fabricacion",
+        title="Endpoint REST: crear orden de fabricación",
         description=(
             "POST /api/v1/orders/ with serializer + use case wired into the "
             "orders application layer; emits orders.created."
         ),
     ),
     SeedTicket(
-        title="Endpoint REST: listar ordenes por estado",
+        title="Endpoint REST: listar órdenes por estado",
         description=(
             "GET /api/v1/orders/?state=... with cursor pagination + filtering."
         ),
     ),
     SeedTicket(
-        title="Setup React + Vite + integracion con DRF",
+        title="Setup React + Vite + integración con DRF",
         description=(
             "Scaffold frontend/ with Vite, TS strict, TanStack Query, and an "
             "OpenAPI-generated client from drf-spectacular."
         ),
     ),
     SeedTicket(
-        title="Pantalla: lista de ordenes con filtros",
+        title="Pantalla: lista de órdenes con filtros",
         description=(
             "Operator-facing list view with state filter, cursor pagination, "
             "and a search box on identifier."
