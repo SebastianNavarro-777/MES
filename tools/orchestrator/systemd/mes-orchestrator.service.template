@@ -1,0 +1,35 @@
+# systemd --user template for the NSG MES orchestrator (Linux).
+#
+# Replace {{HOME_PATH}} and {{USER}} with concrete values, copy to
+#   ~/.config/systemd/user/mes-orchestrator.service
+# and enable + start with:
+#   systemctl --user daemon-reload
+#   systemctl --user enable mes-orchestrator
+#   systemctl --user start mes-orchestrator
+#
+# To follow logs:
+#   journalctl --user -u mes-orchestrator -f
+
+[Unit]
+Description=NSG MES orchestrator (reactive harness driver)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory={{HOME_PATH}}/MES/MES/tools/orchestrator
+ExecStart={{HOME_PATH}}/MES/MES/.venv/bin/python -m orchestrator run-all
+Restart=on-failure
+RestartSec=10s
+
+# Sane environment: pull from a .env that lives in the repo root.
+EnvironmentFile={{HOME_PATH}}/MES/MES/.env
+Environment=PYTHONUNBUFFERED=1
+
+# Log to journald (default for systemd --user); also tee to a file under
+# the orchestrator state dir.
+StandardOutput=append:{{HOME_PATH}}/MES/MES/.orchestrator-state/logs/systemd-stdout.log
+StandardError=append:{{HOME_PATH}}/MES/MES/.orchestrator-state/logs/systemd-stderr.log
+
+[Install]
+WantedBy=default.target
