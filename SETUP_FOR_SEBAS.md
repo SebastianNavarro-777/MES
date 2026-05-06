@@ -52,11 +52,19 @@ Crea estos 5 labels:
 - `applied-default-decision` — el Consultant lo pone cuando ya había 3 `Question` abiertos y aplicó la opción de menor riesgo.
 
 #### 1.3. Tipos de ticket
-Linear no obliga a tener un campo "Type". Tienes dos opciones:
+Linear no obliga a tener un campo "Type" estructurado. Para identificar el tipo de cada ticket usamos **labels `type:*`** (más simple, funciona en cualquier plan de Linear y no necesita admin features).
 
-**Opción A (recomendada):** crea un custom field tipo "Select" llamado `Type` con los valores: `Epic`, `Story`, `Bug`, `Question`, `Harness-Fix`. Los agentes leen este campo para decidir cómo procesar cada ticket.
+Crea estos 5 labels adicionales en la misma sección Settings → NSG Engineering → Labels donde creaste los del paso 1.2:
 
-**Opción B (más simple):** usa labels en lugar de un custom field. Crea labels `type:epic`, `type:story`, `type:bug`, `type:question`, `type:harness-fix`. Si eliges esto, abre un `Question` antes de arrancar para que el Consultant Resolver lo registre como ADR — los prompts asumen el custom field por default.
+| Nombre exacto | Para qué |
+|---|---|
+| `type:epic` | Epics que el Architect crea como contenedor de Stories. |
+| `type:story` | Unidad de trabajo que un Worker implementa. |
+| `type:bug` | Defecto reproducible en código mergeado. Lo abre QA Smoke o Sebas. |
+| `type:question` | Decisión que requiere criterio humano (Sebas). Lo abre el Consultant. |
+| `type:harness-fix` | Mejora al propio harness. Lo abren Auditor o Gardener. |
+
+> **Alternativa (custom field):** si tienes plan Standard+ de Linear, podrías usar un custom field "Select" llamado `Type` en lugar de labels. Funcionalmente equivalente, pero los prompts de los agentes están escritos para leer labels `type:*`. Si eliges custom field, tendrás que ajustar los prompts (un `Harness-Fix` chico).
 
 #### 1.4. Templates de descripción
 El formato exacto de cada tipo de ticket está en [`docs/workflows/ticket-types.md`](docs/workflows/ticket-types.md). Linear soporta plantillas: copia los bloques markdown de ese archivo y crea una plantilla por tipo. Esto te ahorra que el Architect agent escriba el formato a mano cada vez.

@@ -58,13 +58,13 @@ You do **not** have access to write code, edit files (other than via the orchest
 4. **Decompose into Stories.** Aim for 5–12 Stories per Epic. Each Story:
    - Has a title in English following `<verb> <object>` pattern (e.g., "Create Order REST endpoint").
    - Has a 3–5 line description explaining what it covers and why it's a separate Story.
-   - Has the `Type = Story` field set, and the parent Epic linked.
+   - Carries the `type:story` label, and the parent Epic linked.
    - Starts in `Backlog`. (The Spec Writer enriches it later when it moves to `Spec Draft`.)
    - Sets `low-risk` or `high-risk` label per the rules in `worker.md`.
 
-5. **Create the Epic in Linear** with the Epic format from `docs/workflows/ticket-types.md`. List the Stories you're about to create as checkbox children.
+5. **Create the Epic in Linear** with the Epic format from `docs/workflows/ticket-types.md`. Apply the `type:epic` label. List the Stories you're about to create as checkbox children.
 
-6. **Create the Stories in Linear**, each with the parent Epic linked.
+6. **Create the Stories in Linear**, each with the parent Epic linked and the `type:story` label.
 
 7. **Report.** Print a short summary to stderr (the orchestrator captures it):
    `Architect: Epic NSG-XXX created with N Stories: [list of IDs]`.

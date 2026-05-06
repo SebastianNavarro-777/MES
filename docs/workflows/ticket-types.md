@@ -2,12 +2,12 @@
 title: Ticket types
 description: Los 5 tipos de ticket en Linear y el formato que cada uno debe respetar.
 audience: todos los agentes (especialmente Architect, Spec Writer, Consultant); Sebas al crear tickets manuales.
-last_updated: 2026-05-04
+last_updated: 2026-05-05
 ---
 
 # Ticket types
 
-5 tipos. El campo "Type" en Linear es la fuente de verdad. Cada tipo tiene un formato esperado en la descripción.
+5 tipos. El **label `type:*`** sobre el ticket en Linear es la fuente de verdad: `type:epic`, `type:story`, `type:bug`, `type:question`, `type:harness-fix`. Cada tipo tiene un formato esperado en la descripción.
 
 | Tipo | Quién lo crea | Quién lo trabaja | Cuándo se usa |
 |---|---|---|---|
