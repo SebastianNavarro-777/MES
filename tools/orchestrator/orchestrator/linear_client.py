@@ -123,7 +123,7 @@ class LinearClient:
     async def count_issues_by_state(self, state_name: str) -> int:
         """Number of issues in this team currently in the given state."""
         query = """
-        query Count($team: String!, $state: String!) {
+        query Count($team: ID!, $state: String!) {
           issues(
             filter: { team: { id: { eq: $team } }, state: { name: { eq: $state } } }
           ) { nodes { id } }
@@ -140,7 +140,7 @@ class LinearClient:
     async def list_issues_by_state(self, state_name: str) -> list[Issue]:
         """All issues in this team currently in the given state."""
         query = """
-        query List($team: String!, $state: String!) {
+        query List($team: ID!, $state: String!) {
           issues(
             filter: { team: { id: { eq: $team } }, state: { name: { eq: $state } } }
           ) {
