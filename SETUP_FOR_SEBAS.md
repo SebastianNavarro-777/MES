@@ -129,18 +129,67 @@ Cada Worker, Reviewer, QA Smoke y Consultant es Claude Code corriendo headless. 
 
 | MCP | Para qué se usa | Cómo configurarlo |
 |---|---|---|
-| **Linear** | Leer tickets, comentar, mover de estado, adjuntar archivos. | Sigue el README oficial del Linear MCP. Necesita `LINEAR_API_KEY`. |
-| **GitHub** | Crear PRs, comentar, mergear. (También vía `gh` CLI). | Sigue el README oficial del GitHub MCP. |
-| **Context7** | Traer docs vivas de Django/DRF/asyncua/React/etc. en cada sesión. | Usualmente preinstalado en Claude Code; verifica `claude mcp list`. |
-| **Semgrep** | Scan de patrones inseguros sobre el diff (lo usa el Reviewer). | Sigue el README oficial del Semgrep MCP. |
+| **Linear** | Leer tickets, comentar, mover de estado, adjuntar archivos. | OAuth vía claude.ai. Si ves `claude.ai Linear: ✓ Connected` en `claude mcp list`, listo. (No usa el `LINEAR_API_KEY` de `.env` — el orquestador y el MCP son canales paralelos contra el mismo team.) |
+| **GitHub** | Crear PRs, comentar, mergear. (También vía `gh` CLI). | Ver sección 5.A abajo. Dos rutas: Copilot o stdio local. |
+| **Context7** | Traer docs vivas de Django/DRF/asyncua/React/etc. en cada sesión. | Usualmente preinstalado en Claude Code o vía un plugin (ej. `plugin:odoo-owl-dev:context7`); verifica con `claude mcp list`. |
+| **Semgrep** | Scan de patrones inseguros sobre el diff. | **Saltar en Windows.** Ver sección 5.B abajo. |
 
-Verifica con:
+Verifica el inventario con:
 
 ```bash
 claude mcp list
 ```
 
-Tienen que aparecer los 4. Si falta alguno, los prompts hacen fallback prudente — el Worker abrirá un `Question` reportando el MCP faltante en lugar de improvisar.
+Linear, Context7 y GitHub deben estar `✓ Connected`. Semgrep puede faltar — los 7 checks mecánicos del Reviewer no lo requieren, es defense-in-depth opcional.
+
+#### 5.A — GitHub MCP
+
+GitHub tiene dos MCP servers; cuál uses depende de si tienes suscripción a Copilot:
+
+**Si tienes GitHub Copilot (Pro/Business/Enterprise):** ya viene un MCP hosted en `api.githubcopilot.com/mcp/`. Solo re-autentica si está en `Failed to connect`.
+
+**Si NO tienes Copilot (caso común):** instala el MCP stdio local. Usa tu `GITHUB_TOKEN` del `.env`. En PowerShell:
+
+```powershell
+# 1. Pre-instalar el binario para que npx no prompttee
+npm install -g @modelcontextprotocol/server-github
+
+# 2. Verificar que quedó
+Get-Command mcp-server-github
+
+# 3. Registrar en Claude (extrae el token de .env automáticamente)
+$token = (Get-Content .env | Where-Object { $_ -match '^GITHUB_TOKEN=' }) -replace '^GITHUB_TOKEN=', ''
+if ([string]::IsNullOrWhiteSpace($token)) { Write-Host "ERROR: GITHUB_TOKEN no encontrado en .env"; return }
+claude mcp add -e "GITHUB_PERSONAL_ACCESS_TOKEN=$token" -s user github mcp-server-github
+Remove-Variable token
+Clear-History -CommandLine "*GITHUB_PERSONAL_ACCESS_TOKEN*","*GITHUB_TOKEN*"
+```
+
+Quirks conocidos (te ahorran tiempo):
+
+- **NO uses `npx -y` después de `--`**: el parser de Claude (commander.js) y/o PowerShell trata `-y` como flag propio y rompe. Pre-instala el binario con `npm install -g` y referéncialo directamente.
+- **NO uses el separador `--`** entre el `<name>` y `<commandOrUrl>` cuando pasas `-e`. El `-e` es variadic (`<env...>`) y con `--` commander toma todos los posicionales como args para el comando, no como `<name>` y `<commandOrUrl>`. Sin `--`, los posicionales se parsean correctamente.
+
+Valida con:
+
+```powershell
+claude mcp list
+```
+
+Debe aparecer `github: mcp-server-github - ✓ Connected`.
+
+#### 5.B — Semgrep MCP
+
+**En Windows nativo: salta este paso.** Semgrep depende de toolchain Unix; en Windows requiere Docker o WSL para funcionar bien y los retornos no valen la fricción del setup.
+
+**Cuando muevas a la VPS Linux** (Parte 2 de este documento), agrega Semgrep así:
+
+```bash
+python -m uv tool install semgrep-mcp
+claude mcp add -s user semgrep semgrep-mcp
+```
+
+Mientras tanto, los 7 checks del Reviewer son suficientes para empezar. Si en algún momento el Reviewer detecta que necesita Semgrep, va a abrir un `Question` para que sepas que falta — pero no es bloqueante.
 
 ---
 
