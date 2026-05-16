@@ -199,11 +199,17 @@ Una sola vez:
 
 ```bash
 # desde la raíz del repo
-uv sync --extra dev
+uv sync
 ```
 
-Esto crea `.venv/` con Python 3.12, instala todas las deps de runtime y de desarrollo (httpx, rich, pydantic, pydantic-settings, pytest, ruff, mypy, respx, yamllint), y bloquea las versiones en `uv.lock` (que sí está commiteado).
+Esto crea `.venv/` con Python 3.12 e instala:
+- **Runtime** (`[project.dependencies]`): httpx, rich, pydantic, pydantic-settings.
+- **Dev** (`[dependency-groups].dev`): pytest, pytest-asyncio, ruff, mypy, respx, yamllint.
 
+Las versiones quedan ancladas en `uv.lock` (commiteado en el repo).
+
+> **Por qué `uv sync` simple, no `--extra dev`**: pasamos las dev deps de `[project.optional-dependencies]` a `[dependency-groups]`. La diferencia: `[dependency-groups]` se incluye por default en `uv sync` y NO se elimina cuando corres `uv run`. Con `optional-dependencies`, cada `uv run` sin `--extra dev` re-podaba la venv y rompía el stop hook silenciosamente. Si por algún motivo quieres una venv minimal sin dev: `uv sync --no-group dev`.
+>
 > No necesitas `uv sync` adicional dentro de `tools/orchestrator/` — el sub-pyproject de ahí es solo metadata; las deps reales viven en el root.
 
 ---

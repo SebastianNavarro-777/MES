@@ -15,7 +15,13 @@ dependencies = [
     "pydantic-settings>=2.3",
 ]
 
-[project.optional-dependencies]
+[dependency-groups]
+# Modern uv pattern: dependency-groups are installed by default on
+# `uv sync` and stay installed across `uv run` calls (unlike
+# project.optional-dependencies which uv strips when not explicitly
+# requested with --extra). This keeps ruff/mypy/pytest alive in the
+# venv so the .claude/hooks/stop.sh pipeline doesn't go red after a
+# `uv run` invocation.
 dev = [
     "pytest>=8.2",
     "pytest-asyncio>=0.23",

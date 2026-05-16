@@ -27,7 +27,7 @@ jobs:
         run: uv python install 3.12
 
       - name: Sync dev environment
-        run: uv sync --extra dev --frozen
+        run: uv sync --frozen
 
       - name: ruff check
         run: uv run ruff check .
@@ -54,7 +54,7 @@ jobs:
         run: uv python install 3.12
 
       - name: Sync dev environment
-        run: uv sync --extra dev --frozen
+        run: uv sync --frozen
 
       - name: pytest
         run: uv run pytest -q
