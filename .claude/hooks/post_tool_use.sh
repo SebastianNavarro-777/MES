@@ -16,10 +16,29 @@ set -uo pipefail
 
 HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$HOOK_DIR/../.." && pwd)"
+
+# When a Worker spawns claude inside a per-ticket worktree, $REPO_ROOT is
+# the worktree path, which doesn't carry its own .venv. Resolve the main
+# checkout via git so we find the actual interpreter regardless of cwd.
+GIT_COMMON_DIR="$(cd "$REPO_ROOT" && git rev-parse --git-common-dir 2>/dev/null || echo '')"
+if [ -n "$GIT_COMMON_DIR" ]; then
+    case "$GIT_COMMON_DIR" in
+        /*|?:*) ;;
+        *) GIT_COMMON_DIR="$REPO_ROOT/$GIT_COMMON_DIR" ;;
+    esac
+    MAIN_REPO="$(dirname "$GIT_COMMON_DIR")"
+else
+    MAIN_REPO="$REPO_ROOT"
+fi
+
 cd "$REPO_ROOT"
 
-# --- locate a Python interpreter (prefer the project venv) ---
-if [ -x ".venv/Scripts/python.exe" ]; then
+# --- locate a Python interpreter (prefer the main repo's venv) ---
+if [ -x "$MAIN_REPO/.venv/Scripts/python.exe" ]; then
+    PY="$MAIN_REPO/.venv/Scripts/python.exe"
+elif [ -x "$MAIN_REPO/.venv/bin/python" ]; then
+    PY="$MAIN_REPO/.venv/bin/python"
+elif [ -x ".venv/Scripts/python.exe" ]; then
     PY="$REPO_ROOT/.venv/Scripts/python.exe"
 elif [ -x ".venv/bin/python" ]; then
     PY="$REPO_ROOT/.venv/bin/python"
