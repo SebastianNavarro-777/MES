@@ -70,11 +70,25 @@ TYPE_LABELS: tuple[str, ...] = (
 
 # Bounded-context / module labels. The Worker reads these to know which
 # directories it may touch; the Reviewer enforces the scope rule.
+#
+# All five product phases pre-seeded so the Architect never has to call
+# issueLabelCreate when it crosses into Phase 2+. See /ROADMAP.md.
 MODULE_LABELS: tuple[str, ...] = (
-    "module:harness",   # tools/, .claude/, docs/workflows/, prompts
-    "module:platform",  # cross-cutting Django setup, settings, base classes
-    "module:orders",    # apps/orders/
-    "module:frontend",  # frontend/
+    # Cross-cutting + Phase 1
+    "module:harness",       # tools/, .claude/, docs/workflows/, prompts
+    "module:platform",      # cross-cutting Django setup, settings, base classes
+    "module:orders",        # apps/orders/         (Phase 1)
+    "module:frontend",      # frontend/            (all phases)
+    # Phase 2 — Trazabilidad + OPC-UA
+    "module:traceability",  # apps/traceability/   (Phase 2)
+    # Phase 3 — OEE + Downtime
+    "module:oee",           # apps/oee/            (Phase 3)
+    "module:downtime",      # apps/downtime/       (Phase 3)
+    # Phase 4 — Quality / SPC / NCR
+    "module:quality",       # apps/quality/        (Phase 4)
+    # Phase 5 — Scheduling + Maintenance
+    "module:scheduling",    # apps/scheduling/     (Phase 5)
+    "module:maintenance",   # apps/maintenance/    (Phase 5)
 )
 
 CANONICAL_LABELS: tuple[str, ...] = ROUTING_LABELS + TYPE_LABELS + MODULE_LABELS

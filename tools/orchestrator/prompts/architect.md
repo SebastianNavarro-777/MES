@@ -49,7 +49,7 @@ The orchestrator routes tickets by label. A ticket without the right labels is i
 | Family | Names | Purpose |
 |---|---|---|
 | Type (mandatory, exactly one) | `type:epic`, `type:story`, `type:bug`, `type:question`, `type:harness-fix` | Source of truth for ticket type (`docs/workflows/ticket-types.md`). |
-| Module (mandatory, exactly one) | `module:harness`, `module:platform`, `module:orders`, `module:frontend` | Scopes the Worker's allowed diff. Add more `module:*` labels only after creating the corresponding `apps/<name>/` or `frontend/<name>/` directory. |
+| Module (mandatory, exactly one) | Cross-cutting: `module:harness`, `module:platform`, `module:frontend`. Per phase: `module:orders` (P1), `module:traceability` (P2), `module:oee`, `module:downtime` (P3), `module:quality` (P4), `module:scheduling`, `module:maintenance` (P5). | Scopes the Worker's allowed diff. All ten labels are pre-created in Linear, so you never need `issueLabelCreate` for them. If `/ROADMAP.md` later adds a new bounded context not listed here, you may create the label, but mention it in the Epic description so the human notices. |
 | Risk (Stories + Harness-Fix only, exactly one) | `low-risk`, `high-risk` | Controls Reviewer escalation. See **Risk classification** below. |
 | Routing (Consultant uses these, not you) | `needs-human-decision`, `applied-default-decision`, `harness-fix` | Do not set these directly; the Consultant manages them. |
 
