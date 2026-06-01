@@ -4,6 +4,9 @@
 # Triggered by .claude/settings.json after every Write or Edit tool call.
 # Reads structured JSON from stdin (the canonical Claude Code hook protocol),
 # extracts the modified file path, and runs:
+#   - a fast secret-pattern scan on ANY file type (catches accidental
+#     `ghp_…`, `lin_api_…`, `AKIA…`, Slack tokens, PEM blocks before they
+#     leave the worktree — defense in depth; gitleaks runs in CI too)
 #   - `ruff check` on the file (always, for any .py file)
 #   - the architecture linter on the file (only if it lives in apps/ or
 #     packages/, since tools/ is exempt from layer rules per ARCHITECTURE.md)
@@ -72,7 +75,35 @@ case "$tool_name" in
     *) exit 0 ;;
 esac
 
-# Only act on Python source files.
+# --- secret-pattern scan (runs on every file type, before the .py filter) ---
+#
+# Catches obvious tokens the moment an agent writes them, so the fix is
+# "remove from this file" instead of "rotate the credential because it's
+# already on GitHub". Patterns are length-conservative to avoid matching
+# the placeholder strings that live in .env.example / docs walkthroughs.
+#
+# Allowlist:
+#   - .env.example       (intentional placeholder values, all blank today)
+#   - docs/              (example tokens in setup walkthroughs)
+#   - .claude/hooks/     (this script itself contains the patterns)
+case "$file_path" in
+    *.env.example|*/.env.example) ;;
+    */docs/*|*\\docs\\*) ;;
+    */.claude/hooks/*|*\\.claude\\hooks\\*) ;;
+    *)
+        if [ -f "$file_path" ] && grep -qE \
+            'ghp_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{50,}|lin_api_[A-Za-z0-9]{30,}|AKIA[0-9A-Z]{16}|xox[baprs]-[0-9a-zA-Z-]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----' \
+            "$file_path" 2>/dev/null; then
+            echo "[hook] post_tool_use: SECRET PATTERN detected in $file_path." >&2
+            echo "[hook] Remove the credential and load it via Settings/env var instead." >&2
+            echo "[hook] If this is a legitimate test fixture, allowlist the file path" >&2
+            echo "[hook] in .claude/hooks/post_tool_use.sh and document why in the same PR." >&2
+            exit 2
+        fi
+        ;;
+esac
+
+# Only act on Python source files for the lint/architecture steps below.
 case "$file_path" in
     *.py) ;;
     *) exit 0 ;;

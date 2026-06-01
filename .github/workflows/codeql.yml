@@ -1,0 +1,49 @@
+---
+name: CodeQL
+
+# GitHub-native SAST. Runs on every PR + a weekly cron so previously-
+# safe code is re-checked against new query packs as GitHub ships them.
+# Free for public repos and any repo on a GHAS-enabled org.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Monday 07:00 UTC = 01:00 / 02:00 CDMX depending on DST.
+    # Offset from CI cron windows to keep Action quotas spread out.
+    - cron: "0 7 * * 1"
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+
+jobs:
+  analyze:
+    name: CodeQL — ${{ matrix.language }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Add `javascript-typescript` once frontend/ is bootstrapped
+        # (NSG-6 in the seed) so the React + Vite code is also scanned.
+        language: [python]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Initialise CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          # `security-extended` adds queries beyond the default pack —
+          # extra coverage for crypto misuse, taint flow, and command
+          # injection. Marginal cost on a small repo.
+          queries: security-extended
+
+      - name: Analyse
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"

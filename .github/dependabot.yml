@@ -1,0 +1,54 @@
+# Dependabot configuration for the NSG MES harness.
+#
+# Scope:
+# - "pip" ecosystem: reads pyproject.toml at the repo root and proposes
+#   upgrades for runtime + dev deps. Hash-pinning in uv.lock means
+#   Dependabot's PR also bumps the lock when applicable.
+# - "github-actions": keeps the action versions in .github/workflows/*
+#   current so we get upstream security fixes for the runners themselves.
+#
+# Cadence: weekly, low-volume — agents triage these like any other PR.
+# The Reviewer agent treats them as harness work; the Auditor checks
+# their CVE coverage on the next cycle.
+#
+# Reference: https://docs.github.com/en/code-security/dependabot/dependabot-version-updates
+
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "America/Mexico_City"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "harness-fix"
+    commit-message:
+      prefix: "deps"
+      include: "scope"
+    groups:
+      # Roll up minor + patch bumps into a single PR so the Reviewer
+      # doesn't drown in five 1-line diffs every Monday.
+      runtime-deps:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "America/Mexico_City"
+    open-pull-requests-limit: 3
+    labels:
+      - "dependencies"
+      - "harness-fix"
+    commit-message:
+      prefix: "ci"
+      include: "scope"

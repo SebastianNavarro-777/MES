@@ -1,0 +1,44 @@
+---
+name: Security
+
+# Secret-scanning workflow. Sits next to CI but in its own file so failing
+# secret scans don't visually mix with lint/test failures — different
+# triage path: a secret leak means rotate the credential, not just fix
+# the code.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  # gitleaks-action posts a check-run summary; needs write on checks.
+  checks: write
+  pull-requests: read
+
+jobs:
+  gitleaks:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          # gitleaks defaults to scanning the diff on a PR; for push to
+          # main we want the full history so a token committed by an
+          # earlier branch can't slip through.
+          fetch-depth: 0
+
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # No GITLEAKS_LICENSE — we're on a public org-free tier.
+          # Default ruleset covers AWS, GCP, GitHub, Slack, generic
+          # high-entropy strings. If false positives appear on
+          # .env.example or docs/ placeholders, add a .gitleaks.toml
+          # at the repo root with an `[allowlist]` block.
+          GITLEAKS_ENABLE_COMMENTS: false
+          GITLEAKS_ENABLE_SUMMARY: true

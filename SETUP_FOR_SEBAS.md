@@ -292,15 +292,24 @@ Esto crea 1 Epic + 8 Stories en `Backlog`. El Architect agent al primer disparo 
 
 ---
 
-### 10. (Opcional) Configurar branch protection en GitHub
+### 10. (Opcional pero recomendado) Configurar branch protection en GitHub
 
-Settings → Branches → Add rule para `main`. Marca como required:
+Settings → Branches → Add rule para `main`. Marca como required (la primera tanda es la que tenías; los 4 nuevos son del pipeline de seguridad que se agregó):
 
+**Tanda original (lint/test/arch):**
 - `CI / Lint (ruff + mypy + architecture)`
 - `CI / Test (pytest)`
 - `Architecture Lint / tools/linters/architecture.py`
 
-Esto previene que se mergee algo a `main` con CI rojo. El Reviewer agent ya intenta esto; los protected branches son la red de seguridad si un agente se equivoca.
+**Tanda de seguridad (agregar después de que corra al menos una vez cada uno):**
+- `CI / Security audit (pip-audit)` — CVE scanner sobre `uv.lock`
+- `CI / License check (pip-licenses)` — rechaza AGPL/GPL/LGPL
+- `Security / Secret scan (gitleaks)` — scan full-history de tokens
+- `CodeQL / CodeQL — python` — SAST nativo de GitHub
+
+> **Por qué "después de que corra al menos una vez":** GitHub solo te deja seleccionar un check como required si ya lo ha visto pasar (o fallar) en algún PR. Después de mergear este commit a `main`, los 4 checks van a correr — entonces vuelves a Settings → Branches y los marcas required en bloque.
+
+Esto previene que se mergee algo a `main` con CI rojo. El Reviewer agent ya intenta esto; los protected branches son la red de seguridad si un agente se equivoca, y los 4 checks de seguridad cierran los huecos de supply chain + leak de credenciales.
 
 ---
 

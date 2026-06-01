@@ -59,6 +59,58 @@ jobs:
       - name: pytest
         run: uv run pytest -q
 
+  security-audit:
+    name: Security audit (pip-audit)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Pin Python 3.12
+        run: uv python install 3.12
+
+      - name: Sync dev environment
+        run: uv sync --frozen
+
+      - name: pip-audit
+        # Audits every package installed in the synced venv (runtime + dev)
+        # against PyPI's vulnerability database. Fails the build on any
+        # known CVE. To suppress a known-but-unfixable CVE temporarily,
+        # add `--ignore-vuln GHSA-xxxx-xxxx-xxxx` here AND open a
+        # Harness-Fix ticket to track the upgrade window.
+        run: uv run --with pip-audit pip-audit --strict
+
+  license-check:
+    name: License check (pip-licenses)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Pin Python 3.12
+        run: uv python install 3.12
+
+      - name: Sync dev environment
+        run: uv sync --frozen
+
+      - name: Reject copyleft licenses
+        # MES is commercial software. Copyleft (AGPL, GPL, LGPL) deps
+        # would contaminate the distribution. MIT/BSD/Apache/MPL are OK.
+        # Customers in regulated industries (21 CFR, IATF) audit this.
+        run: |
+          uv run --with pip-licenses pip-licenses \
+            --fail-on="AGPL-3.0;AGPL-3.0-only;AGPL-3.0-or-later;GPL-3.0;GPL-3.0-only;GPL-3.0-or-later;LGPL-3.0;LGPL-3.0-only;LGPL-3.0-or-later"
+
   build:
     name: Build (placeholder)
     runs-on: ubuntu-latest
