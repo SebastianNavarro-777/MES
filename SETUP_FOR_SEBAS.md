@@ -132,6 +132,7 @@ Cada Worker, Reviewer, QA Smoke y Consultant es Claude Code corriendo headless. 
 | **Linear** | Leer tickets, comentar, mover de estado, adjuntar archivos. | OAuth vía claude.ai. Si ves `claude.ai Linear: ✓ Connected` en `claude mcp list`, listo. (No usa el `LINEAR_API_KEY` de `.env` — el orquestador y el MCP son canales paralelos contra el mismo team.) |
 | **GitHub** | Crear PRs, comentar, mergear. (También vía `gh` CLI). | Ver sección 5.A abajo. Dos rutas: Copilot o stdio local. |
 | **Context7** | Traer docs vivas de Django/DRF/asyncua/React/etc. en cada sesión. | Usualmente preinstalado en Claude Code o vía un plugin (ej. `plugin:odoo-owl-dev:context7`); verifica con `claude mcp list`. |
+| **Playwright** | Manejar el browser desde Worker (capturar screenshots de UI) y QA Smoke (E2E happy-path en staging). Lo asumen `prompts/worker.md` y `prompts/qa_smoke.md`. | Ver sección 5.C abajo. |
 | **Semgrep** | Scan de patrones inseguros sobre el diff. | **Saltar en Windows.** Ver sección 5.B abajo. |
 
 Verifica el inventario con:
@@ -140,7 +141,7 @@ Verifica el inventario con:
 claude mcp list
 ```
 
-Linear, Context7 y GitHub deben estar `✓ Connected`. Semgrep puede faltar — los 7 checks mecánicos del Reviewer no lo requieren, es defense-in-depth opcional.
+Linear, Context7, GitHub y Playwright deben estar `✓ Connected`. Semgrep puede faltar — los 7 checks mecánicos del Reviewer no lo requieren, es defense-in-depth opcional.
 
 #### 5.A — GitHub MCP
 
@@ -190,6 +191,39 @@ claude mcp add -s user semgrep semgrep-mcp
 ```
 
 Mientras tanto, los 7 checks del Reviewer son suficientes para empezar. Si en algún momento el Reviewer detecta que necesita Semgrep, va a abrir un `Question` para que sepas que falta — pero no es bloqueante.
+
+#### 5.C — Playwright MCP
+
+El Worker y QA Smoke esperan tener `playwright` MCP para navegar el browser, hacer screenshots y validar flows E2E. Si falta, el primer ticket que toque UI (NSG-6 en el seed) se va a bloquear con un `Question` de "MCP missing".
+
+Microsoft mantiene el MCP oficial en `@playwright/mcp`. En PowerShell, **desde `C:\Users\SebasNavarro\MES\MES`** (cualquier directorio funcionaría, pero mantenemos la convención del resto del setup):
+
+```powershell
+# 1. Pre-cachear el paquete para que npx no prompttee en runtime headless
+npx -y @playwright/mcp@latest --version
+
+# 2. Descargar Chromium (lo que Playwright maneja por default).
+#    Esto es ~120 MB; corre una sola vez.
+npx playwright install chromium
+
+# 3. Registrar el MCP a user scope (igual que GitHub MCP)
+claude mcp add -s user playwright npx "@playwright/mcp@latest"
+```
+
+Valida con:
+
+```powershell
+claude mcp list
+```
+
+Debe aparecer `playwright: npx @playwright/mcp@latest - ✓ Connected`.
+
+Quirks conocidos:
+
+- **No necesita token ni env var** — el servidor levanta Chromium local, no llama a ningún API.
+- **Aísla por sesión**: cada vez que Claude Code arranca, lanza un browser nuevo. No persistente. Bueno para reproducibilidad, malo si necesitas estado entre llamadas (no es el caso aquí).
+- **El binario `npx @playwright/mcp@latest` resuelve el paquete por nombre**, no necesitas `npm install -g` como con GitHub MCP. Microsoft publicó el paquete así específicamente para el flow de `claude mcp add`.
+- **Si Chromium no descarga** (firewall corporativo, proxy), corre `npx playwright install chromium --dry-run` para ver qué URL está intentando, y agrega excepción en tu proxy.
 
 ---
 

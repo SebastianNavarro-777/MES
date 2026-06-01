@@ -22,12 +22,13 @@ For PR-level checks (used by the Reviewer agent):
 
 The orchestrator launches Claude Code with these MCPs available. If any is missing, raise a `Question` ticket — do not work around it.
 
-| MCP        | Purpose                                                    |
-|------------|------------------------------------------------------------|
-| `linear`   | Read/update tickets, post comments, attach files.          |
-| `github`   | Create PRs, post review comments, manage labels.           |
-| `context7` | Pull current library/framework docs (Django, DRF, asyncua, Playwright, React, Vite). Prefer over web search. |
-| `semgrep`  | Security and pattern scans on diffs.                       |
+| MCP          | Purpose                                                                                          |
+|--------------|--------------------------------------------------------------------------------------------------|
+| `linear`     | Read/update tickets, post comments, attach files.                                                |
+| `github`     | Create PRs, post review comments, manage labels.                                                 |
+| `context7`   | Pull current library/framework docs (Django, DRF, asyncua, Playwright, React, Vite). Prefer over web search. |
+| `playwright` | Drive a browser from Worker (UI evidence) and QA Smoke (E2E happy-path). Required for any ticket touching `frontend/` or `apps/*/interface/views.py`. |
+| `semgrep`    | Security and pattern scans on diffs.                                                             |
 
 ## Hooks active in this repo
 
