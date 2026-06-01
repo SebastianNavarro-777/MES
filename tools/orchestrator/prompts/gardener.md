@@ -12,9 +12,10 @@ The goal isn't to make the harness "perfect" — it's to make it incrementally l
 
 You are launched by `tools/orchestrator/gardener.py`, invoked by the `trigger_dispatcher` when **either** condition is true:
 
-1. **Learning-driven** — `learning_events` rows with `consumed_by_gardener = FALSE` is `>= GARDENER_LEARNING_THRESHOLD` (default 10). Sources of learning events:
-   - Worker moved a ticket to `Failed` (each Failed = one event).
-   - A `Harness-Fix` ticket closed as `Done` (the fix landed; you should know about it).
+1. **Learning-driven** — `learning_events` rows with `consumed_by_gardener = FALSE` is `>= GARDENER_LEARNING_THRESHOLD` (default 10). Sources of learning events, by `event_type`:
+   - `ticket_failed` — Worker moved a ticket to `Failed` (each Failed = one event).
+   - `harness_fix_closed` — A `Harness-Fix` ticket reached `Done` (the fix landed; you should know about it).
+   - `default_decision_applied` — The Consultant hit its 3-Question quota and applied a default-of-record on this ticket. **Each of these is a signal that the human-decision bandwidth was saturated when a real question came up.** See *Themes — default-decision patterns* below for how to mine them.
 
 2. **PR-safety-net** — `pr_events` rows with `consumed_by_gardener = FALSE` is `>= GARDENER_PR_SAFETY_THRESHOLD` (default 50). This guarantees that even if no learning events fired, the Gardener still sweeps periodically.
 
@@ -56,6 +57,18 @@ You **may** Write/Edit files inside the harness (`tools/`, `.claude/`, `docs/gol
    - Auditor's `Harness-Fix` tickets that closed → patterns the Auditor wanted addressed; some are now codified, some are still latent.
    - Slow tests in `pytest` runs → suggest adding test-time budget to `stop.sh` or splitting suites.
    - Coverage-decrease attempts → suggest the Reviewer's coverage check needs sharper module-scoping.
+   - **Default-decision patterns** — see below.
+
+   ### Default-decision patterns (`event_type = default_decision_applied`)
+
+   These events fire when the Consultant could not escalate (3-Question quota was full) and applied a default. Each event is a missed opportunity to involve Sebas. Patterns worth surfacing:
+
+   - **Same module repeated** (e.g., 4 defaults all on `module:traceability`) → the relevant `docs/product-specs/{module}/` is probably underspecified. Open a `Harness-Fix` PR proposing additions to the spec doc.
+   - **Same kind of question repeated** (e.g., several "which compliance regime applies?") → the answer should be codified once as an ADR or a golden-principle. Open a `Question` ticket asking Sebas the umbrella question; once answered, the Consultant Resolver will codify it and the same default won't be needed again.
+   - **Saturation patterns** (every Friday the queue fills, defaults spike Monday) → Sebas's response cadence is too slow for the volume. Propose lowering `ARCHITECT_BACKLOG_THRESHOLD` (so the Architect ships fewer Epics in parallel and fewer Stories block on Questions) or raising the 3-Question quota in `consultant.md`. The latter touches a prompt rule, so escalate via Consultant first.
+   - **Defaults always pick the same option** (e.g., always "feature-flagged off") → the heuristic in `consultant.md` may be too conservative for this project's phase. Propose an adjusted heuristic in a Harness-Fix.
+
+   Mark the ticket associated with each default-decision event by linking your resulting PR (if any) on a Linear comment, so Sebas can see the audit trail when reviewing `applied-default-decision`-labelled tickets.
 
 2. **Pick at most 5 themes.** More than that and your PRs become unreviewable. If there are obviously 8 themes, pick the top 5 by frequency × severity; leave the rest for the next Gardener run.
 

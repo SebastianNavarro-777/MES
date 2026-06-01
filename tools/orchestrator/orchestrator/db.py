@@ -301,6 +301,35 @@ class Database:
             row_id = cur.lastrowid
         return int(row_id) if row_id is not None else 0
 
+    def record_learning_event_once(self, event_type: str, ticket_id: str) -> int:
+        """Idempotent variant for poll-driven sources.
+
+        Inserts a new ``learning_events`` row only if no unconsumed row
+        with the same ``(event_type, ticket_id)`` already exists.
+        Returns the row id of the newly-inserted row, or ``0`` when a
+        duplicate was suppressed.
+
+        Use this from any recurring loop (e.g., ``recolector`` ticks) so
+        the Gardener's learning counter isn't inflated by repeated
+        observations of the same condition. Once the Gardener consumes
+        the row (``consumed_by_gardener = 1``), a future observation of
+        the same condition will produce a fresh row — which is the
+        correct behaviour: the harness may legitimately need to learn
+        from the same ticket twice if circumstances change between
+        Gardener cycles.
+        """
+        row = self._conn.execute(
+            """
+            SELECT id FROM learning_events
+            WHERE event_type = ? AND ticket_id = ? AND consumed_by_gardener = 0
+            LIMIT 1
+            """,
+            (event_type, ticket_id),
+        ).fetchone()
+        if row is not None:
+            return 0
+        return self.record_learning_event(event_type, ticket_id)
+
     def list_learning_events(
         self, *, consumed_by_gardener: bool | None = None
     ) -> list[LearningEvent]:

@@ -77,8 +77,13 @@ class ConsultantResolver:
             f"and transition the blocking ticket back to Ready for Agent. "
             f"You are the Consultant Resolver."
         )
+        # NOTE: this resolves to prompts/consultant_resolver.md (not
+        # consultant.md). The two prompts are deliberately separate because
+        # they have opposite write-permissions: the Consultant is read-only
+        # and creates Questions, the Consultant Resolver writes docs and
+        # opens PRs after Sebas answers.
         await self._claude.run(
-            agent_name="consultant",
+            agent_name="consultant_resolver",
             user_prompt=user_prompt,
             workspace=self._settings.worktrees_path,
         )
