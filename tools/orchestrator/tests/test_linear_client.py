@@ -262,6 +262,204 @@ async def test_attach_file_succeeds() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Labels
+# ---------------------------------------------------------------------------
+
+
+@respx.mock
+async def test_list_team_labels_returns_name_to_uuid_map() -> None:
+    respx.post(LINEAR_GRAPHQL_URL).mock(
+        return_value=_ok(
+            {
+                "team": {
+                    "labels": {
+                        "nodes": [
+                            {"id": "uuid-a", "name": "type:story"},
+                            {"id": "uuid-b", "name": "module:orders"},
+                            {"id": "uuid-c", "name": "low-risk"},
+                        ]
+                    }
+                }
+            }
+        )
+    )
+    async with LinearClient("k", "team") as client:
+        labels = await client.list_team_labels()
+    assert labels == {
+        "type:story": "uuid-a",
+        "module:orders": "uuid-b",
+        "low-risk": "uuid-c",
+    }
+
+
+@respx.mock
+async def test_list_team_labels_empty_team_returns_empty_dict() -> None:
+    respx.post(LINEAR_GRAPHQL_URL).mock(
+        return_value=_ok({"team": {"labels": {"nodes": []}}})
+    )
+    async with LinearClient("k", "team") as client:
+        labels = await client.list_team_labels()
+    assert labels == {}
+
+
+@respx.mock
+async def test_list_team_labels_raises_when_team_missing() -> None:
+    respx.post(LINEAR_GRAPHQL_URL).mock(return_value=_ok({"team": None}))
+    async with LinearClient("k", "team") as client:
+        with pytest.raises(LinearClientError):
+            await client.list_team_labels()
+
+
+@respx.mock
+async def test_create_label_returns_uuid() -> None:
+    respx.post(LINEAR_GRAPHQL_URL).mock(
+        return_value=_ok(
+            {
+                "issueLabelCreate": {
+                    "success": True,
+                    "issueLabel": {"id": "new-uuid", "name": "module:orders"},
+                }
+            }
+        )
+    )
+    async with LinearClient("k", "team") as client:
+        uuid = await client.create_label("module:orders")
+    assert uuid == "new-uuid"
+
+
+@respx.mock
+async def test_create_label_raises_on_non_success() -> None:
+    respx.post(LINEAR_GRAPHQL_URL).mock(
+        return_value=_ok({"issueLabelCreate": {"success": False, "issueLabel": None}})
+    )
+    async with LinearClient("k", "team") as client:
+        with pytest.raises(LinearClientError):
+            await client.create_label("module:orders")
+
+
+@respx.mock
+async def test_create_label_sends_team_id_and_optional_color() -> None:
+    captured: dict[str, object] = {}
+
+    def _capture(request: httpx.Request) -> httpx.Response:
+        import json
+
+        captured.update(json.loads(request.content))
+        return _ok(
+            {
+                "issueLabelCreate": {
+                    "success": True,
+                    "issueLabel": {"id": "x", "name": "module:orders"},
+                }
+            }
+        )
+
+    respx.post(LINEAR_GRAPHQL_URL).mock(side_effect=_capture)
+    async with LinearClient("k", "team-xyz") as client:
+        await client.create_label("module:orders", color="#E2E2E2")
+    payload_input = captured["variables"]["input"]  # type: ignore[index]
+    assert payload_input == {
+        "teamId": "team-xyz",
+        "name": "module:orders",
+        "color": "#E2E2E2",
+    }
+
+
+@respx.mock
+async def test_ensure_labels_reuses_existing_and_creates_missing() -> None:
+    """Idempotency: known names skip creation, unknown names get created."""
+    calls: list[dict[str, object]] = []
+
+    def _route(request: httpx.Request) -> httpx.Response:
+        import json
+
+        body = json.loads(request.content)
+        calls.append(body)
+        query = str(body.get("query", ""))
+        if "TeamLabels" in query:
+            return _ok(
+                {
+                    "team": {
+                        "labels": {
+                            "nodes": [
+                                {"id": "existing-1", "name": "type:story"},
+                                {"id": "existing-2", "name": "low-risk"},
+                            ]
+                        }
+                    }
+                }
+            )
+        # else: it's a CreateLabel call
+        name = body["variables"]["input"]["name"]
+        return _ok(
+            {
+                "issueLabelCreate": {
+                    "success": True,
+                    "issueLabel": {"id": f"new-{name}", "name": name},
+                }
+            }
+        )
+
+    respx.post(LINEAR_GRAPHQL_URL).mock(side_effect=_route)
+    async with LinearClient("k", "team") as client:
+        out = await client.ensure_labels(
+            ["type:story", "module:orders", "low-risk", "module:frontend"]
+        )
+    assert out == {
+        "type:story": "existing-1",
+        "module:orders": "new-module:orders",
+        "low-risk": "existing-2",
+        "module:frontend": "new-module:frontend",
+    }
+    # 1 list call + 2 creates (only the unknown names)
+    assert len(calls) == 3
+    create_names = sorted(
+        c["variables"]["input"]["name"]  # type: ignore[index]
+        for c in calls
+        if "CreateLabel" in str(c.get("query", ""))
+    )
+    assert create_names == ["module:frontend", "module:orders"]
+
+
+@respx.mock
+async def test_update_issue_labels_succeeds() -> None:
+    respx.post(LINEAR_GRAPHQL_URL).mock(
+        return_value=_ok({"issueUpdate": {"success": True}})
+    )
+    async with LinearClient("k", "team") as client:
+        await client.update_issue_labels("issue-uuid", ["lbl-1", "lbl-2"])
+
+
+@respx.mock
+async def test_update_issue_labels_raises_on_non_success() -> None:
+    respx.post(LINEAR_GRAPHQL_URL).mock(
+        return_value=_ok({"issueUpdate": {"success": False}})
+    )
+    async with LinearClient("k", "team") as client:
+        with pytest.raises(LinearClientError):
+            await client.update_issue_labels("issue-uuid", ["lbl-1"])
+
+
+@respx.mock
+async def test_update_issue_labels_sends_label_ids_array() -> None:
+    captured: dict[str, object] = {}
+
+    def _capture(request: httpx.Request) -> httpx.Response:
+        import json
+
+        captured.update(json.loads(request.content))
+        return _ok({"issueUpdate": {"success": True}})
+
+    respx.post(LINEAR_GRAPHQL_URL).mock(side_effect=_capture)
+    async with LinearClient("k", "team") as client:
+        await client.update_issue_labels("issue-uuid", ["lbl-1", "lbl-2", "lbl-3"])
+    assert captured["variables"] == {
+        "id": "issue-uuid",
+        "labelIds": ["lbl-1", "lbl-2", "lbl-3"],
+    }
+
+
+# ---------------------------------------------------------------------------
 # Error handling
 # ---------------------------------------------------------------------------
 

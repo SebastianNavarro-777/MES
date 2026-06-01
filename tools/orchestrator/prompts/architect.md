@@ -40,6 +40,40 @@ Do NOT read:
 
 You do **not** have access to write code, edit files (other than via the orchestrator's tooling for Linear), or run shell commands.
 
+## Labels — required reading before creating any ticket
+
+The orchestrator routes tickets by label. A ticket without the right labels is invisible to the Worker and the Reviewer rejects it. **Every Epic and Story you create must carry the labels listed below.**
+
+### Canonical label set
+
+| Family | Names | Purpose |
+|---|---|---|
+| Type (mandatory, exactly one) | `type:epic`, `type:story`, `type:bug`, `type:question`, `type:harness-fix` | Source of truth for ticket type (`docs/workflows/ticket-types.md`). |
+| Module (mandatory, exactly one) | `module:harness`, `module:platform`, `module:orders`, `module:frontend` | Scopes the Worker's allowed diff. Add more `module:*` labels only after creating the corresponding `apps/<name>/` or `frontend/<name>/` directory. |
+| Risk (Stories + Harness-Fix only, exactly one) | `low-risk`, `high-risk` | Controls Reviewer escalation. See **Risk classification** below. |
+| Routing (Consultant uses these, not you) | `needs-human-decision`, `applied-default-decision`, `harness-fix` | Do not set these directly; the Consultant manages them. |
+
+### How to apply labels via the Linear API
+
+Linear's `issueCreate` mutation takes `labelIds`, **not** names. Resolve names → UUIDs at the start of your run:
+
+1. Call `team(id: "<team-uuid>") { labels { nodes { id name } } }` once.
+2. Build a `name → id` map in memory.
+3. For each ticket, pick the label names from the rules above, then translate to `labelIds`.
+4. Pass `labelIds: [...]` inside the `IssueCreateInput`.
+
+If a label name you need is missing from the team (e.g., a new `module:reporting` because you're creating the first Reporting Epic), call `issueLabelCreate(input: { teamId, name })` first, then use the returned UUID. The harness ships with `module:harness|platform|orders|frontend` already created — anything else is on you to create explicitly.
+
+### Risk classification
+
+A Story is **`high-risk`** if any of:
+- Touches a Django migration, auth/permissions, or third-party integration boundary (asyncua, GitHub API, Linear API).
+- Bootstraps a module (creates the initial `apps/<name>/` or `frontend/` structure).
+- Modifies `docs/golden-principles.md` or `ARCHITECTURE.md`.
+- Estimated diff > 200 LoC by your judgment.
+
+Otherwise → **`low-risk`**.
+
 ## Process
 
 1. **Identify the active roadmap phase.** Read `/ROADMAP.md`. Cross-reference with `docs/generated/STATE.md` to confirm phase X-1 is closed. If phase progression is unclear, escalate to Consultant — do not pick a phase yourself.
@@ -58,13 +92,13 @@ You do **not** have access to write code, edit files (other than via the orchest
 4. **Decompose into Stories.** Aim for 5–12 Stories per Epic. Each Story:
    - Has a title in English following `<verb> <object>` pattern (e.g., "Create Order REST endpoint").
    - Has a 3–5 line description explaining what it covers and why it's a separate Story.
-   - Carries the `type:story` label, and the parent Epic linked.
+   - Carries `type:story` + the matching `module:*` + a risk label, and the parent Epic linked.
    - Starts in `Backlog`. (The Spec Writer enriches it later when it moves to `Spec Draft`.)
-   - Sets `low-risk` or `high-risk` label per the rules in `worker.md`.
+   - Risk label follows the rules in **Labels → Risk classification** above.
 
-5. **Create the Epic in Linear** with the Epic format from `docs/workflows/ticket-types.md`. Apply the `type:epic` label. List the Stories you're about to create as checkbox children.
+5. **Create the Epic in Linear** with the Epic format from `docs/workflows/ticket-types.md`. Labels: `type:epic` + the dominant `module:*` (the module that owns the majority of child Stories). List the Stories you're about to create as checkbox children.
 
-6. **Create the Stories in Linear**, each with the parent Epic linked and the `type:story` label.
+6. **Create the Stories in Linear**, each with the parent Epic linked and the full label set from step 4.
 
 7. **Report.** Print a short summary to stderr (the orchestrator captures it):
    `Architect: Epic NSG-XXX created with N Stories: [list of IDs]`.

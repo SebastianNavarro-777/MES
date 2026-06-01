@@ -33,10 +33,20 @@ class SeedTicket:
     title: str
     description: str
     is_epic: bool = False
+    # Labels applied at creation. These are *names*; the seed resolves them
+    # to UUIDs once via ``LinearClient.ensure_labels`` before the create
+    # loop, so any missing labels are auto-created.
+    labels: tuple[str, ...] = ()
 
 
 # The seed set defined in the prompt. Numbered for clarity; descriptions
 # are intentionally short — Spec Writer enriches each Story when picked.
+#
+# Labels follow the canonical set documented in
+# ``tools/orchestrator/seed/sync_labels.py``:
+#   - ``type:*`` is mandatory and the source of truth for ticket type.
+#   - ``module:*`` scopes the Worker's diff and the Reviewer's check.
+#   - ``low-risk`` / ``high-risk`` controls Reviewer escalation policy.
 SEEDS: list[SeedTicket] = [
     SeedTicket(
         title="MES Fase 1 — Núcleo de órdenes",
@@ -46,6 +56,7 @@ SEEDS: list[SeedTicket] = [
             "persisted in Postgres. See /ROADMAP.md."
         ),
         is_epic=True,
+        labels=("type:epic", "module:orders"),
     ),
     SeedTicket(
         title="Setup Django project + base config",
@@ -53,6 +64,7 @@ SEEDS: list[SeedTicket] = [
             "Bootstrap the Django 5 project with DRF, settings split per env, "
             "auth, audit-log mixin scaffolding, and the initial migration."
         ),
+        labels=("type:story", "module:platform", "high-risk"),
     ),
     SeedTicket(
         title="Crear bounded context `orders` con modelos base",
@@ -60,6 +72,7 @@ SEEDS: list[SeedTicket] = [
             "Create apps/orders/{domain,application,infrastructure,interface}/ "
             "with the ManufacturingOrder entity and a state-machine helper."
         ),
+        labels=("type:story", "module:orders", "high-risk"),
     ),
     SeedTicket(
         title="Endpoint REST: crear orden de fabricación",
@@ -67,12 +80,14 @@ SEEDS: list[SeedTicket] = [
             "POST /api/v1/orders/ with serializer + use case wired into the "
             "orders application layer; emits orders.created."
         ),
+        labels=("type:story", "module:orders", "low-risk"),
     ),
     SeedTicket(
         title="Endpoint REST: listar órdenes por estado",
         description=(
             "GET /api/v1/orders/?state=... with cursor pagination + filtering."
         ),
+        labels=("type:story", "module:orders", "low-risk"),
     ),
     SeedTicket(
         title="Setup React + Vite + integración con DRF",
@@ -80,6 +95,7 @@ SEEDS: list[SeedTicket] = [
             "Scaffold frontend/ with Vite, TS strict, TanStack Query, and an "
             "OpenAPI-generated client from drf-spectacular."
         ),
+        labels=("type:story", "module:frontend", "high-risk"),
     ),
     SeedTicket(
         title="Pantalla: lista de órdenes con filtros",
@@ -87,6 +103,7 @@ SEEDS: list[SeedTicket] = [
             "Operator-facing list view with state filter, cursor pagination, "
             "and a search box on identifier."
         ),
+        labels=("type:story", "module:frontend", "low-risk"),
     ),
     SeedTicket(
         title="Pantalla: detalle de orden + cambio de estado",
@@ -94,6 +111,7 @@ SEEDS: list[SeedTicket] = [
             "Detail page showing order + transitions allowed by the state "
             "machine, with a confirmation modal for transitions."
         ),
+        labels=("type:story", "module:frontend", "low-risk"),
     ),
     SeedTicket(
         title="Setup tools/verification/deploy_staging.sh + docker-compose staging",
@@ -102,6 +120,7 @@ SEEDS: list[SeedTicket] = [
             "the Django app + the React bundle, plus a deploy_staging.sh "
             "wrapper that takes a merge SHA."
         ),
+        labels=("type:harness-fix", "module:harness", "high-risk"),
     ),
 ]
 
@@ -115,8 +134,10 @@ def _print_dry_run() -> None:
     print("Seed tickets (dry-run -- nothing is created):")
     for i, t in enumerate(SEEDS):
         kind = "Epic " if t.is_epic else "Story"
+        label_str = ", ".join(t.labels) if t.labels else "(no labels)"
         print(f"  {i + 1:2d}. [{kind}] {t.title}")
         print(f"       {t.description[:100]}")
+        print(f"       labels: {label_str}")
 
 
 async def _commit(settings: Settings) -> int:
@@ -136,13 +157,24 @@ async def _commit(settings: Settings) -> int:
     async with LinearClient(
         settings.LINEAR_API_KEY, settings.LINEAR_TEAM_ID
     ) as client:
+        # Resolve every label the seed needs up front. ensure_labels is
+        # idempotent: existing labels keep their UUID, missing ones get
+        # created. One round-trip cost regardless of how many seeds reuse
+        # the same label.
+        needed = sorted({n for t in SEEDS for n in t.labels})
+        name_to_uuid: dict[str, str] = (
+            await client.ensure_labels(needed) if needed else {}
+        )
+
         epic_id: str | None = None
         for t in SEEDS:
+            label_ids = [name_to_uuid[n] for n in t.labels if n in name_to_uuid]
             issue = await client.create_issue(
                 title=t.title,
                 description=t.description,
                 parent_id=epic_id if not t.is_epic else None,
                 project_id=project_id,
+                label_ids=label_ids or None,
             )
             print(f"created {issue.identifier}: {t.title}")
             if t.is_epic:

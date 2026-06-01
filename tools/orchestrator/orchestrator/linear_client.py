@@ -280,6 +280,106 @@ class LinearClient:
         if not data.get("attachmentCreate", {}).get("success"):
             raise LinearClientError(f"attachmentCreate on {issue_id} returned non-success")
 
+    # -- labels --------------------------------------------------------------
+
+    async def list_team_labels(self) -> dict[str, str]:
+        """Return ``{name: id}`` for every label on this team.
+
+        Linear's API requires label UUIDs to attach labels to issues, so
+        the orchestrator resolves names locally via this map. Names are
+        case-sensitive — Linear treats ``type:story`` and ``Type:Story``
+        as different labels.
+        """
+        query = """
+        query TeamLabels($team: String!) {
+          team(id: $team) {
+            labels { nodes { id name } }
+          }
+        }
+        """
+        data = await self._post(query, {"team": self._team_id})
+        team = data.get("team")
+        if not isinstance(team, dict):
+            raise LinearClientError("team payload missing or malformed")
+        nodes = team.get("labels", {}).get("nodes", [])
+        if not isinstance(nodes, list):
+            raise LinearClientError("team.labels.nodes is not a list")
+        result: dict[str, str] = {}
+        for node in nodes:
+            if not isinstance(node, dict):
+                continue
+            name = node.get("name")
+            uuid = node.get("id")
+            if isinstance(name, str) and isinstance(uuid, str):
+                result[name] = uuid
+        return result
+
+    async def create_label(self, name: str, *, color: str | None = None) -> str:
+        """Create a label scoped to this team. Returns the UUID.
+
+        ``color`` is a 6-digit hex string like ``"#E2E2E2"``. If omitted,
+        Linear picks a default.
+        """
+        mutation = """
+        mutation CreateLabel($input: IssueLabelCreateInput!) {
+          issueLabelCreate(input: $input) {
+            success
+            issueLabel { id name }
+          }
+        }
+        """
+        input_payload: dict[str, Any] = {"teamId": self._team_id, "name": name}
+        if color:
+            input_payload["color"] = color
+        data = await self._post(mutation, {"input": input_payload})
+        result = data.get("issueLabelCreate", {})
+        if not result.get("success"):
+            raise LinearClientError(f"issueLabelCreate({name}) returned non-success")
+        label = result.get("issueLabel")
+        if not isinstance(label, dict):
+            raise LinearClientError("issueLabelCreate did not return the label")
+        uuid = label.get("id")
+        if not isinstance(uuid, str):
+            raise LinearClientError("issueLabelCreate returned no id")
+        return uuid
+
+    async def ensure_labels(self, names: list[str]) -> dict[str, str]:
+        """Return ``{name: id}`` for every requested label, creating missing ones.
+
+        Idempotent: existing labels keep their UUID and color; only the
+        truly missing names get a fresh ``issueLabelCreate``. The caller
+        does not have to know which labels already existed.
+        """
+        existing = await self.list_team_labels()
+        result: dict[str, str] = {}
+        for name in names:
+            if name in existing:
+                result[name] = existing[name]
+                continue
+            result[name] = await self.create_label(name)
+        return result
+
+    async def update_issue_labels(
+        self, issue_id: str, label_ids: list[str]
+    ) -> None:
+        """Overwrite the label set on an issue.
+
+        Linear's ``issueUpdate(input: {labelIds})`` *replaces* the full
+        set — there is no add-only mutation. Callers wanting to merge
+        with the existing labels should first fetch the issue and union
+        the two lists themselves.
+        """
+        mutation = """
+        mutation UpdateLabels($id: String!, $labelIds: [String!]!) {
+          issueUpdate(id: $id, input: { labelIds: $labelIds }) { success }
+        }
+        """
+        data = await self._post(mutation, {"id": issue_id, "labelIds": label_ids})
+        if not data.get("issueUpdate", {}).get("success"):
+            raise LinearClientError(
+                f"issueUpdate({issue_id}) labels returned non-success"
+            )
+
 
 # ---------------------------------------------------------------------------
 # Helpers
