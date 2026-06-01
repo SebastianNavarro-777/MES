@@ -123,6 +123,16 @@ async def _commit(settings: Settings) -> int:
     if not settings.is_configured():
         print("Refusing to --commit: live credentials missing.", file=sys.stderr)
         return 2
+    project_id = settings.LINEAR_PROJECT_ID or None
+    if project_id:
+        print(f"Assigning seed tickets to project {project_id[:8]}...")
+    else:
+        print(
+            "WARNING: LINEAR_PROJECT_ID not set in .env. Tickets will land at "
+            "team level only (won't appear in your project view). Add the "
+            "project UUID to .env and re-run if you want them in a project.",
+            file=sys.stderr,
+        )
     async with LinearClient(
         settings.LINEAR_API_KEY, settings.LINEAR_TEAM_ID
     ) as client:
@@ -132,6 +142,7 @@ async def _commit(settings: Settings) -> int:
                 title=t.title,
                 description=t.description,
                 parent_id=epic_id if not t.is_epic else None,
+                project_id=project_id,
             )
             print(f"created {issue.identifier}: {t.title}")
             if t.is_epic:

@@ -180,6 +180,79 @@ async def test_create_issue_returns_issue() -> None:
 
 
 @respx.mock
+async def test_create_issue_with_project_id_includes_it_in_payload() -> None:
+    """Regression: seed tickets were landing at team level without a project.
+    Verify projectId is forwarded to the GraphQL input when provided."""
+    captured: dict[str, object] = {}
+
+    def _capture(request: httpx.Request) -> httpx.Response:
+        import json
+
+        captured.update(json.loads(request.content))
+        return _ok(
+            {
+                "issueCreate": {
+                    "success": True,
+                    "issue": {
+                        "id": "x",
+                        "identifier": "NSG-1",
+                        "title": "T",
+                        "description": "",
+                        "state": {"name": "Backlog"},
+                        "labels": {"nodes": []},
+                        "parent": None,
+                    },
+                }
+            }
+        )
+
+    respx.post(LINEAR_GRAPHQL_URL).mock(side_effect=_capture)
+    async with LinearClient("k", "team") as client:
+        await client.create_issue(
+            title="T",
+            description="",
+            project_id="proj-uuid-abc",
+        )
+    payload_input = captured["variables"]["input"]  # type: ignore[index]
+    assert payload_input["projectId"] == "proj-uuid-abc"
+    assert payload_input["teamId"] == "team"
+
+
+@respx.mock
+async def test_create_issue_without_project_id_omits_field() -> None:
+    """If no project_id is passed, projectId must NOT be in the payload
+    (Linear treats missing differently from explicit null)."""
+    captured: dict[str, object] = {}
+
+    def _capture(request: httpx.Request) -> httpx.Response:
+        import json
+
+        captured.update(json.loads(request.content))
+        return _ok(
+            {
+                "issueCreate": {
+                    "success": True,
+                    "issue": {
+                        "id": "x",
+                        "identifier": "NSG-2",
+                        "title": "T",
+                        "description": "",
+                        "state": {"name": "Backlog"},
+                        "labels": {"nodes": []},
+                        "parent": None,
+                    },
+                }
+            }
+        )
+
+    respx.post(LINEAR_GRAPHQL_URL).mock(side_effect=_capture)
+    async with LinearClient("k", "team") as client:
+        await client.create_issue(title="T", description="")
+    payload_input = captured["variables"]["input"]  # type: ignore[index]
+    assert "projectId" not in payload_input
+
+
+@respx.mock
 async def test_attach_file_succeeds() -> None:
     respx.post(LINEAR_GRAPHQL_URL).mock(
         return_value=_ok({"attachmentCreate": {"success": True}})

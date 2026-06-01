@@ -218,9 +218,15 @@ class LinearClient:
         description: str,
         team_id: str | None = None,
         parent_id: str | None = None,
+        project_id: str | None = None,
         label_ids: list[str] | None = None,
     ) -> Issue:
-        """Create a new issue. Returns the created issue."""
+        """Create a new issue. Returns the created issue.
+
+        ``project_id``: optional Linear project UUID. If provided, the
+        issue lands inside that project (appears in the project view).
+        If omitted, the issue lives at team level only.
+        """
         mutation = """
         mutation CreateIssue($input: IssueCreateInput!) {
           issueCreate(input: $input) {
@@ -244,6 +250,8 @@ class LinearClient:
         }
         if parent_id:
             input_payload["parentId"] = parent_id
+        if project_id:
+            input_payload["projectId"] = project_id
         if label_ids:
             input_payload["labelIds"] = label_ids
         data = await self._post(mutation, {"input": input_payload})

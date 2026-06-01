@@ -43,6 +43,14 @@ class Settings(BaseSettings):
         default="",
         description="Linear team UUID where MES tickets live.",
     )
+    LINEAR_PROJECT_ID: str = Field(
+        default="",
+        description=(
+            "Optional Linear project UUID. When set, the seed script and the "
+            "Architect agent assign new tickets to this project so they appear "
+            "in the project view. Empty = tickets land at team level only."
+        ),
+    )
 
     # --- GitHub ---
     GITHUB_TOKEN: str = Field(
