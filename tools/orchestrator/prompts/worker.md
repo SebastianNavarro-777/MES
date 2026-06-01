@@ -14,21 +14,24 @@ You are launched by `tools/orchestrator/worker.py` (the worker pool, default siz
 
 Always read first (every session):
 1. `/AGENTS.md`, `/ARCHITECTURE.md`, `/CLAUDE.md`.
-2. `docs/golden-principles.md`.
-3. `docs/workflows/DEFINITION_OF_DONE.md`.
-4. `docs/generated/STATE.md`.
-5. The Story ticket — title, Contexto, ACs, Notas técnicas, parent Epic.
+2. `docs/golden-principles.md` — mechanical rules.
+3. `docs/DEVELOPMENT.md` — engineering handbook (naming, layer patterns, error handling, testing, logging, gotchas). **This is how you should write code in this repo.** If a question about style or structure isn't answered here, follow the existing pattern in the bounded context you're touching.
+4. `docs/workflows/DEFINITION_OF_DONE.md`.
+5. `docs/generated/STATE.md`.
+6. The Story ticket — title, Contexto, ACs, Notas técnicas, parent Epic.
 
 Read by ticket type:
-6. Feature → `docs/product-specs/{module}/README.md`.
-7. Bug → `docs/architecture/` + `docs/generated/STATE.md` + the failing test if linked.
-8. Integration → `docs/architecture/integrations/{system}.md`.
-9. Compliance → `docs/domain/compliance/`.
-10. Refactor → recent `docs/decisions/` (≤ 90 days).
+7. Feature → `docs/product-specs/{module}/README.md`.
+8. **UI ticket** (touches `frontend/` or `apps/*/interface/views.py` for a screen) → `docs/ui-design.md` + `docs/FRONTEND.md`.
+9. Bug → `docs/architecture/` + `docs/generated/STATE.md` + the failing test if linked.
+10. Integration → `docs/architecture/integrations/{system}.md`.
+11. Compliance → `docs/domain/compliance/`.
+12. Refactor → recent `docs/decisions/` (≤ 90 days).
 
 Read on demand:
-11. `docs/domain/glossary.md` for terminology.
-12. The `context7` MCP for current docs of any library you call.
+13. `docs/domain/glossary.md` for terminology.
+14. `docs/vision/core-beliefs.md` only when two valid technical paths force a values-based choice.
+15. The `context7` MCP for current docs of any library you call.
 
 Do NOT read `docs/exec-plans/completed/` or ADRs older than 90 days.
 
@@ -41,6 +44,19 @@ Do NOT read `docs/exec-plans/completed/` or ADRs older than 90 days.
 - `context7` MCP — fetch current library docs.
 - `semgrep` MCP — security/pattern scan on your diff before opening the PR.
 - `playwright` MCP — capture screenshots/videos for UI Stories.
+
+## When to use each tool
+
+Discoverability matters. The tool list above is comprehensive — these rules tell you *when* each one is the right choice. Skipping these wastes tokens (over-querying `context7`) or burns time (writing code without checking the existing pattern first).
+
+- **Read existing code FIRST.** Before `context7`, before any docs query: grep the bounded context you're touching for similar shapes. Patterns are local; reuse them.
+- **`context7` MCP** when you're about to call a library method you haven't used in the last hour. Even libraries you "know" — Django 5 changes, DRF API surface drifts, `asyncua` evolves. Prefer this over web search.
+- **`semgrep` MCP** ALWAYS before opening the PR. Runs on your diff in <30 s. Catches credential leaks, SQL injection patterns, async/sync mismatches.
+- **`playwright` MCP** when the ticket touched `frontend/` OR a screen in `apps/*/interface/views.py`. Skip for backend-only changes — taking a screenshot of a JSON response wastes everyone's time.
+- **Bash `uv run mypy` and `uv run ruff`** between layers — after writing domain, after writing application, etc. Don't wait until the end; layer-by-layer feedback is faster than diagnosing a 200-line failure at PR time.
+- **`linear` MCP** only for ticket-related I/O (read, comment, attach, transition). Don't use it to fetch docs or look up code — that's what `context7` and Read are for.
+- **`github` MCP / `gh` CLI** at the very end to open the PR. The Reviewer agent processes the PR; you don't.
+- **`verify_ticket.sh`** is the full pipeline gate before the PR. Always green locally → always green in CI. If it fails locally but CI was green for someone else's similar work, you have a real local-env issue — comment on the ticket, don't paper over it.
 
 ## Process
 
