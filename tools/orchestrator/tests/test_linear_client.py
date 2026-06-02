@@ -262,6 +262,54 @@ async def test_attach_file_succeeds() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Workflow states
+# ---------------------------------------------------------------------------
+
+
+@respx.mock
+async def test_list_team_states_returns_name_to_uuid_map() -> None:
+    respx.post(LINEAR_GRAPHQL_URL).mock(
+        return_value=_ok(
+            {
+                "team": {
+                    "states": {
+                        "nodes": [
+                            {"id": "state-1", "name": "Backlog"},
+                            {"id": "state-2", "name": "Spec Draft"},
+                            {"id": "state-3", "name": "Ready for Agent"},
+                        ]
+                    }
+                }
+            }
+        )
+    )
+    async with LinearClient("k", "team") as client:
+        states = await client.list_team_states()
+    assert states == {
+        "Backlog": "state-1",
+        "Spec Draft": "state-2",
+        "Ready for Agent": "state-3",
+    }
+
+
+@respx.mock
+async def test_list_team_states_empty_team_returns_empty_dict() -> None:
+    respx.post(LINEAR_GRAPHQL_URL).mock(
+        return_value=_ok({"team": {"states": {"nodes": []}}})
+    )
+    async with LinearClient("k", "team") as client:
+        assert await client.list_team_states() == {}
+
+
+@respx.mock
+async def test_list_team_states_raises_when_team_missing() -> None:
+    respx.post(LINEAR_GRAPHQL_URL).mock(return_value=_ok({"team": None}))
+    async with LinearClient("k", "team") as client:
+        with pytest.raises(LinearClientError):
+            await client.list_team_states()
+
+
+# ---------------------------------------------------------------------------
 # Labels
 # ---------------------------------------------------------------------------
 

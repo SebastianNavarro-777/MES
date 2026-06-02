@@ -26,6 +26,7 @@ from .linear_client import LinearClient
 from .qa_smoke_runner import QASmokeDaemon
 from .recolector import Recolector
 from .reviewer import ReviewerDaemon
+from .spec_writer_runner import SpecWriterDaemon
 from .state_machine import TicketState
 from .trigger_dispatcher import (
     AgentName,
@@ -180,6 +181,9 @@ async def run_all(*, env_overrides: dict[str, Any] | None = None) -> int:
     consultant = ConsultantResolver(
         settings=settings, db=db, linear=linear, claude=claude
     )
+    spec_writer = SpecWriterDaemon(
+        settings=settings, db=db, linear=linear, claude=claude
+    )
 
     try:
         await asyncio.gather(
@@ -188,6 +192,7 @@ async def run_all(*, env_overrides: dict[str, Any] | None = None) -> int:
             reviewer.run_forever(stop_event=stop_event),
             qa.run_forever(stop_event=stop_event),
             consultant.run_forever(stop_event=stop_event),
+            spec_writer.run_forever(stop_event=stop_event),
             _trigger_loop(
                 settings=settings,
                 db=db,

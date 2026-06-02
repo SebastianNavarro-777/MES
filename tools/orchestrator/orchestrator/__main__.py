@@ -229,18 +229,31 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    if args.command == "run-all":
-        return asyncio.run(run_all())
-    if args.command == "architect":
-        return asyncio.run(cmd_architect(force=bool(args.run_now)))
-    if args.command == "auditor":
-        return asyncio.run(cmd_auditor(force=bool(args.run_now)))
-    if args.command == "gardener":
-        return asyncio.run(cmd_gardener(force=bool(args.run_now)))
-    if args.command == "trigger-dispatcher":
-        # Currently --inspect is the only mode; if absent we still print snapshot.
-        _ = args.inspect
-        return asyncio.run(cmd_trigger_dispatcher_inspect())
+    # Windows asyncio does not support ``loop.add_signal_handler``, so the
+    # SIGINT installed in ``run_all`` is suppressed (see the
+    # ``contextlib.suppress(NotImplementedError, RuntimeError)`` wrapper).
+    # That means Ctrl-C reaches ``asyncio.run`` as a raw KeyboardInterrupt
+    # *after* the daemons have been cancelled — printing a noisy traceback
+    # to a user who did exactly the right thing. Catch it here so the
+    # cancellation propagates internally (the daemons see CancelledError
+    # in their ``stop.wait()`` and unwind cleanly) but the user sees a
+    # clean exit. Posix paths get the same handling for symmetry.
+    try:
+        if args.command == "run-all":
+            return asyncio.run(run_all())
+        if args.command == "architect":
+            return asyncio.run(cmd_architect(force=bool(args.run_now)))
+        if args.command == "auditor":
+            return asyncio.run(cmd_auditor(force=bool(args.run_now)))
+        if args.command == "gardener":
+            return asyncio.run(cmd_gardener(force=bool(args.run_now)))
+        if args.command == "trigger-dispatcher":
+            # Currently --inspect is the only mode; if absent we still print snapshot.
+            _ = args.inspect
+            return asyncio.run(cmd_trigger_dispatcher_inspect())
+    except KeyboardInterrupt:
+        print("\nshutdown complete (SIGINT).", file=sys.stderr)
+        return 0
 
     parser.print_help()
     return 1

@@ -280,6 +280,44 @@ class LinearClient:
         if not data.get("attachmentCreate", {}).get("success"):
             raise LinearClientError(f"attachmentCreate on {issue_id} returned non-success")
 
+    # -- workflow states -----------------------------------------------------
+
+    async def list_team_states(self) -> dict[str, str]:
+        """Return ``{name: id}`` for every workflow state on this team.
+
+        Linear's ``issueUpdate(input: { stateId })`` mutation requires a
+        state UUID. The orchestrator reads state names from
+        ``state_machine.py`` (``"Backlog"``, ``"Spec Draft"``, etc.) so
+        any daemon that needs to transition a ticket calls this once and
+        caches the result.
+
+        Names are case-sensitive and must match what Sebas created in
+        Linear during SETUP step 1.1.
+        """
+        query = """
+        query TeamStates($team: String!) {
+          team(id: $team) {
+            states { nodes { id name } }
+          }
+        }
+        """
+        data = await self._post(query, {"team": self._team_id})
+        team = data.get("team")
+        if not isinstance(team, dict):
+            raise LinearClientError("team payload missing or malformed")
+        nodes = team.get("states", {}).get("nodes", [])
+        if not isinstance(nodes, list):
+            raise LinearClientError("team.states.nodes is not a list")
+        result: dict[str, str] = {}
+        for node in nodes:
+            if not isinstance(node, dict):
+                continue
+            name = node.get("name")
+            uuid = node.get("id")
+            if isinstance(name, str) and isinstance(uuid, str):
+                result[name] = uuid
+        return result
+
     # -- labels --------------------------------------------------------------
 
     async def list_team_labels(self) -> dict[str, str]:
