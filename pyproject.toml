@@ -28,8 +28,12 @@ dev = [
     "ruff>=0.5",
     "mypy>=1.10",
     "respx>=0.21",
-    "yamllint>=1.35",
 ]
+# yamllint is intentionally NOT in the synced venv: it is GPL-3.0-or-later,
+# which the `license-check` CI job (pip-licenses) rejects for the commercial
+# distribution. Like pip-audit/pip-licenses, it is a dev/CI CLI tool, so it
+# is run ephemerally — `uv run --with yamllint yamllint .` (config in
+# .yamllint.yml) — keeping copyleft out of the audited dependency surface.
 
 [tool.uv]
 package = false
