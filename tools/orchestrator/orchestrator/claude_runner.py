@@ -95,9 +95,30 @@ class ClaudeRunner:
         Returns once the process exits or the timeout fires.
         """
         system_prompt_path = self.prompt_path(agent_name)
+        # ``--dangerously-skip-permissions`` is the documented way to run
+        # Claude Code in non-interactive automation (CI, orchestrators).
+        # In headless ``--print`` mode there is no UI to surface the
+        # "Approve this MCP tool?" dialog, so without this flag every
+        # ``linear.*``, ``github.*``, ``playwright.*`` call silently
+        # fails with permission-not-granted and the agent exits 0 having
+        # accomplished nothing — that's the failure mode we hit on the
+        # first Spec Writer run.
+        #
+        # Defense in depth is preserved by other layers:
+        #   * each agent's system prompt restricts what it may do
+        #     (Spec Writer reads docs and edits Linear; Worker touches
+        #     only its module's files; Reviewer only opens PR comments);
+        #   * .claude/hooks/post_tool_use.sh blocks secret leaks + runs
+        #     ruff/architecture-linter on every Edit/Write before the
+        #     change can survive the session;
+        #   * .claude/hooks/stop.sh re-runs ruff + mypy --strict + arch
+        #     + pytest before the session is allowed to complete;
+        #   * GitHub branch protection requires CI green + a Reviewer-
+        #     approved PR before anything reaches main.
         args: list[str] = [
             self._binary,
-            "--print",  # non-interactive
+            "--print",
+            "--dangerously-skip-permissions",
             "--system-prompt-file",
             str(system_prompt_path),
         ]
