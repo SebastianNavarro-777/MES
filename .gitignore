@@ -89,6 +89,10 @@ playwright-report/
 test-results/
 .playwright/
 
+# --- Agent / Worker local artefacts (attached to Linear, not committed) ---
+.worker-artefacts/
+.playwright-mcp/
+
 # --- Misc ---
 *.pid
 *.seed
