@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -40,6 +41,26 @@ class ClaudeRunnerError(RuntimeError):
     """Raised when ``claude`` cannot be launched (binary missing, etc.)."""
 
 
+def _resolve_binary(name: str) -> str:
+    """Find an executable by name, honouring PATHEXT on Windows.
+
+    ``asyncio.create_subprocess_exec`` does NOT search PATH the way
+    ``subprocess.run`` does — on Windows it ignores ``PATHEXT``, so a
+    plain ``"claude"`` lookup misses the actual ``claude.cmd`` shim that
+    npm installs. ``shutil.which`` does the full resolution (PATH +
+    PATHEXT + executable bit on POSIX), returning an absolute path we
+    can hand directly to asyncio.
+
+    Absolute paths are returned unchanged when they're already
+    executable. Bare names that can't be resolved are passed through so
+    the eventual subprocess failure surfaces the expected
+    ``FileNotFoundError`` with the original name in the message — the
+    upstream error is still actionable.
+    """
+    resolved = shutil.which(name)
+    return resolved if resolved else name
+
+
 class ClaudeRunner:
     """Async runner that launches Claude Code headless against a workspace."""
 
@@ -49,7 +70,8 @@ class ClaudeRunner:
         claude_binary: str | None = None,
         prompts_dir: Path = PROMPTS_DIR,
     ) -> None:
-        self._binary = claude_binary or os.environ.get("CLAUDE_CONFIG_PATH") or "claude"
+        raw = claude_binary or os.environ.get("CLAUDE_CONFIG_PATH") or "claude"
+        self._binary = _resolve_binary(raw)
         self._prompts_dir = prompts_dir
 
     def prompt_path(self, agent_name: str) -> Path:
