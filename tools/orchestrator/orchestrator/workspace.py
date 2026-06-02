@@ -70,6 +70,38 @@ class WorkspaceManager:
         )
         return Workspace(ticket_id=ticket_id, path=wt_path, branch=branch)
 
+    async def create_from_branch(
+        self, ticket_id: str, *, branch: str
+    ) -> Workspace:
+        """Create a worktree checked out on an existing PR branch.
+
+        Used for *fix* runs: a ticket whose PR failed review/CI is
+        re-worked on the same branch rather than starting from ``main``,
+        so the existing PR is updated in place (CI re-runs) instead of a
+        duplicate PR being opened.
+
+        We fetch the branch from ``origin`` first because the orchestrator's
+        main checkout may not have the Worker's pushed branch locally, then
+        reset a local branch of the same name to the remote tip so the
+        worktree reflects exactly what is on the PR.
+        """
+        wt_path = self.worktrees_dir / ticket_id
+        if wt_path.exists():
+            raise WorkspaceError(
+                f"worktree already exists at {wt_path}; run cleanup first"
+            )
+        await self._git("fetch", "origin", branch, cwd=self.repo_root)
+        await self._git(
+            "worktree",
+            "add",
+            "-B",
+            branch,
+            str(wt_path),
+            f"origin/{branch}",
+            cwd=self.repo_root,
+        )
+        return Workspace(ticket_id=ticket_id, path=wt_path, branch=branch)
+
     async def cleanup(self, workspace: Workspace) -> None:
         """Remove the worktree and delete its directory."""
         with contextlib.suppress(WorkspaceError):

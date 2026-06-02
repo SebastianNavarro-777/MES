@@ -31,6 +31,7 @@ from .claude_runner import ClaudeRunner
 from .config import Settings, repo_root
 from .db import Database
 from .linear_client import Issue, LinearClient
+from .recovery import escalate_to_human, needs_human
 from .state_machine import TicketState
 
 __all__ = ["SpecWriterDaemon"]
@@ -40,6 +41,9 @@ log = logging.getLogger(__name__)
 # Type labels indicating a ticket needs Spec Writer treatment. Mirrors
 # ``tools/orchestrator/seed/sync_labels.py``.
 ENRICHABLE_TYPES: tuple[str, ...] = ("type:story", "type:bug", "type:harness-fix")
+
+# Retry-budget key for Spec Draft re-drives in the ``ticket_attempts`` table.
+_SPEC_STAGE = "spec"
 
 
 class SpecWriterDaemon:
@@ -85,12 +89,29 @@ class SpecWriterDaemon:
                 continue
 
     async def tick(self) -> None:
-        ticket = await self._pick_one()
-        if ticket is None:
+        picked = await self._pick_one()
+        if picked is None:
             return
+        ticket, already_in_spec_draft = picked
         self._in_flight.add(ticket.identifier)
         try:
-            if not await self._transition_to_spec_draft(ticket):
+            if already_in_spec_draft:
+                # Orphaned Spec Draft: a previous agent run died before
+                # completing the Spec Draft → Ready for Agent transition.
+                # Re-drive it, bounded by MAX_AUTO_RETRIES, then escalate
+                # so we never loop forever on an unenrichable ticket.
+                if (
+                    self._db.get_attempts(ticket.identifier, _SPEC_STAGE)
+                    >= self._settings.MAX_AUTO_RETRIES
+                ):
+                    await escalate_to_human(
+                        self._linear,
+                        ticket,
+                        reason="Spec Writer could not reach Ready for Agent",
+                    )
+                    return
+                self._db.bump_attempt(ticket.identifier, _SPEC_STAGE)
+            elif not await self._transition_to_spec_draft(ticket):
                 # Transition failed → leave the ticket in Backlog so a
                 # later tick (or a manual move) can retry. Don't spawn
                 # the agent on a half-failed state change.
@@ -99,16 +120,35 @@ class SpecWriterDaemon:
         finally:
             self._in_flight.discard(ticket.identifier)
 
-    async def _pick_one(self) -> Issue | None:
-        """Pick the first Backlog ticket of an enrichable type."""
-        issues = await self._linear.list_issues_by_state(
+    async def _pick_one(self) -> tuple[Issue, bool] | None:
+        """Pick the next ticket to enrich.
+
+        Returns ``(issue, already_in_spec_draft)`` or ``None``. Backlog
+        has priority over re-driving orphaned Spec Drafts so new work
+        always drains before we spend a tick on recovery. The bool tells
+        ``tick`` whether the Backlog → Spec Draft transition still needs
+        to happen.
+        """
+        backlog = await self._linear.list_issues_by_state(
             TicketState.BACKLOG.value
         )
-        for issue in issues:
+        for issue in backlog:
             if issue.identifier in self._in_flight:
                 continue
             if any(t in issue.labels for t in ENRICHABLE_TYPES):
-                return issue
+                return issue, False
+        # No fresh Backlog work: recover Spec Drafts stranded by a prior
+        # agent run. Skip ones already escalated to a human.
+        spec_drafts = await self._linear.list_issues_by_state(
+            TicketState.SPEC_DRAFT.value
+        )
+        for issue in spec_drafts:
+            if issue.identifier in self._in_flight:
+                continue
+            if needs_human(issue):
+                continue
+            if any(t in issue.labels for t in ENRICHABLE_TYPES):
+                return issue, True
         return None
 
     async def _transition_to_spec_draft(self, ticket: Issue) -> bool:

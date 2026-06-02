@@ -38,6 +38,9 @@ from tools.orchestrator.orchestrator.state_machine import (
         (TicketState.IN_PROGRESS, TicketState.IN_REVIEW),
         (TicketState.IN_PROGRESS, TicketState.BLOCKED),
         (TicketState.IN_PROGRESS, TicketState.FAILED),
+        # In Progress → Ready for Agent: orphan re-claim after a Worker
+        # crash (failed_recovery re-queues a stale In Progress ticket).
+        (TicketState.IN_PROGRESS, TicketState.READY_FOR_AGENT),
         # Blocked → unblocked by Consultant Resolver
         (TicketState.BLOCKED, TicketState.READY_FOR_AGENT),
         (TicketState.BLOCKED, TicketState.FAILED),

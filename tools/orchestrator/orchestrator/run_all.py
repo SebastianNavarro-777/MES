@@ -22,6 +22,8 @@ from .claude_runner import ClaudeRunner
 from .config import Settings, repo_root
 from .consultant_resolver import ConsultantResolver
 from .db import Database
+from .failed_recovery import FailedRecoveryDaemon
+from .github_client import GitHubClient
 from .linear_client import LinearClient
 from .qa_smoke_runner import QASmokeDaemon
 from .recolector import Recolector
@@ -79,13 +81,20 @@ async def startup_check(
     if linear is not None:
         try:
             for state in [
+                TicketState.SPEC_DRAFT,
                 TicketState.READY_FOR_AGENT,
+                TicketState.IN_PROGRESS,
                 TicketState.IN_REVIEW,
                 TicketState.READY_FOR_QA,
-                TicketState.SPEC_DRAFT,
+                TicketState.FAILED,
             ]:
                 count = await linear.count_issues_by_state(state.value)
                 console.print(f"  Linear  {state.value:20s}  {count}")
+            # All three stuck states self-heal: spec_writer_runner re-drives
+            # orphaned Spec Drafts, and failed_recovery re-queues Failed
+            # tickets immediately and stale In Progress orphans once they
+            # pass IN_PROGRESS_GRACE_SECONDS — all bounded by MAX_AUTO_RETRIES
+            # before a `needs-human` label stops the loop.
         except Exception:
             console.print("[red]Linear unreachable[/] — recolector will retry.")
 
@@ -167,12 +176,14 @@ async def run_all(*, env_overrides: dict[str, Any] | None = None) -> int:
             loop.add_signal_handler(sig, _handle_signal)
 
     recolector = Recolector(linear=linear, db=db)
+    github = GitHubClient()
     worker_pool = WorkerPool(
         settings=settings,
         db=db,
         linear=linear,
         claude=claude,
         workspaces=workspaces,
+        github=github,
     )
     reviewer = ReviewerDaemon(
         settings=settings, db=db, linear=linear, claude=claude
@@ -184,6 +195,9 @@ async def run_all(*, env_overrides: dict[str, Any] | None = None) -> int:
     spec_writer = SpecWriterDaemon(
         settings=settings, db=db, linear=linear, claude=claude
     )
+    failed_recovery = FailedRecoveryDaemon(
+        settings=settings, db=db, linear=linear
+    )
 
     try:
         await asyncio.gather(
@@ -193,6 +207,7 @@ async def run_all(*, env_overrides: dict[str, Any] | None = None) -> int:
             qa.run_forever(stop_event=stop_event),
             consultant.run_forever(stop_event=stop_event),
             spec_writer.run_forever(stop_event=stop_event),
+            failed_recovery.run_forever(stop_event=stop_event),
             _trigger_loop(
                 settings=settings,
                 db=db,

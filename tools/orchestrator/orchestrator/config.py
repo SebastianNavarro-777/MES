@@ -76,6 +76,28 @@ class Settings(BaseSettings):
 
     # --- Concurrency / triggers ---
     MAX_CONCURRENT_WORKERS: int = Field(default=2, ge=1, le=16)
+    MAX_AUTO_RETRIES: int = Field(
+        default=2,
+        ge=0,
+        le=10,
+        description=(
+            "How many times the recovery daemons re-attempt a stuck ticket "
+            "before labelling it `needs-human` and giving up. Applies "
+            "per-stage: Spec Writer re-drives of orphaned Spec Drafts, and "
+            "Failed → Ready for Agent re-queues. 0 disables auto-retry."
+        ),
+    )
+    IN_PROGRESS_GRACE_SECONDS: int = Field(
+        default=2700,
+        ge=60,
+        description=(
+            "How long a ticket may sit in In Progress before the recovery "
+            "daemon treats it as orphaned (a Worker that crashed mid-run) "
+            "and re-queues it to Ready for Agent. Must exceed the longest "
+            "possible Worker run so a live agent is never yanked — the "
+            "claude_runner timeout is 30 min, so the default is 45 min."
+        ),
+    )
     AUDITOR_PR_THRESHOLD: int = Field(default=5, ge=1)
     GARDENER_LEARNING_THRESHOLD: int = Field(default=10, ge=1)
     GARDENER_PR_SAFETY_THRESHOLD: int = Field(default=50, ge=1)

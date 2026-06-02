@@ -21,7 +21,20 @@ __all__ = [
     "GitHubClient",
     "GitHubClientError",
     "PullRequestSummary",
+    "branch_matches_ticket",
 ]
+
+
+def branch_matches_ticket(head_ref: str, ticket_id: str) -> bool:
+    """Whether a PR head branch belongs to a ticket.
+
+    Worker branches are ``<type>/<TICKET-ID>-<slug>`` (``feat``/``fix``/
+    ``refactor``/``harness``) or occasionally bare ``<TICKET-ID>-<slug>``.
+    We match the ticket segment with a boundary so ``NSG-1`` does not
+    match ``NSG-10``'s branch.
+    """
+    segment = head_ref.split("/")[-1]
+    return segment == ticket_id or segment.startswith(f"{ticket_id}-")
 
 
 @dataclass(frozen=True)
@@ -138,6 +151,55 @@ class GitHubClient:
             is_draft=bool(data.get("isDraft", False)),
             labels=labels,
         )
+
+    async def find_open_pr_for_ticket(
+        self, *, repo: str, ticket_id: str, cwd: str | None = None
+    ) -> PullRequestSummary | None:
+        """Return the open PR whose branch belongs to ``ticket_id``, if any.
+
+        Used by the Worker pool to tell a *fix* (a ticket re-queued after
+        its PR failed review/CI, which already has an open PR) from a
+        *fresh* implementation (a ticket with no PR yet).
+        """
+        out = await self._run(
+            "pr",
+            "list",
+            "--repo",
+            repo,
+            "--state",
+            "open",
+            "--json",
+            "number,title,state,url,headRefName,baseRefName,isDraft,labels",
+            cwd=cwd,
+        )
+        data: object = json.loads(out)
+        if not isinstance(data, list):
+            raise GitHubClientError("gh pr list did not return a list")
+        for entry in data:
+            if not isinstance(entry, dict):
+                continue
+            head_ref = str(entry.get("headRefName", ""))
+            if not branch_matches_ticket(head_ref, ticket_id):
+                continue
+            labels_list = entry.get("labels", [])
+            labels: tuple[str, ...] = ()
+            if isinstance(labels_list, list):
+                labels = tuple(
+                    str(label.get("name", ""))
+                    for label in labels_list
+                    if isinstance(label, dict)
+                )
+            return PullRequestSummary(
+                number=int(entry.get("number", 0)),
+                title=str(entry.get("title", "")),
+                state=str(entry.get("state", "")),
+                url=str(entry.get("url", "")),
+                head_ref=head_ref,
+                base_ref=str(entry.get("baseRefName", "")),
+                is_draft=bool(entry.get("isDraft", False)),
+                labels=labels,
+            )
+        return None
 
     async def merge_pr(
         self,

@@ -83,6 +83,9 @@ ALLOWED_TRANSITIONS: dict[TicketState, frozenset[TicketState]] = {
             TicketState.IN_REVIEW,  # PR opened.
             TicketState.BLOCKED,  # Consultant invoked mid-implementation.
             TicketState.FAILED,  # Worker gave up after 2 retries.
+            TicketState.READY_FOR_AGENT,  # Orphan re-claim: the Worker
+            # crashed mid-run and left the ticket stranded here; the
+            # failed_recovery daemon re-queues it after a grace period.
         }
     ),
     # Question opened; waiting on Sebas.
@@ -163,8 +166,10 @@ def actionable_states() -> frozenset[TicketState]:
 
     These are states where SOMETHING in the harness needs to act on the
     ticket. ``Backlog`` is excluded (the Architect creates tickets there;
-    we don't pick them up automatically — the recolector promotes them
-    into ``Spec Draft`` instead). ``Done`` is terminal.
+    we don't pick them up automatically — the Spec Writer daemon polls
+    Linear directly and promotes them into ``Spec Draft``). ``Failed`` is
+    likewise excluded: the ``failed_recovery`` daemon polls it directly and
+    re-queues to ``Ready for Agent``. ``Done`` is terminal.
     """
     return frozenset(
         {

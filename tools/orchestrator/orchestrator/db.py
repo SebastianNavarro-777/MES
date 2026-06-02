@@ -112,6 +112,18 @@ CREATE TABLE IF NOT EXISTS learning_events (
     occurred_at           TEXT NOT NULL,
     consumed_by_gardener  INTEGER NOT NULL DEFAULT 0
 );
+
+CREATE TABLE IF NOT EXISTS ticket_attempts (
+    ticket_id   TEXT NOT NULL,
+    stage       TEXT NOT NULL,
+    attempts    INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (ticket_id, stage)
+);
+
+CREATE TABLE IF NOT EXISTS in_progress_seen (
+    ticket_id     TEXT PRIMARY KEY,
+    first_seen_at TEXT NOT NULL
+);
 """
 
 
@@ -220,6 +232,98 @@ class Database:
     def remove_work_item(self, ticket_id: str) -> None:
         with self.transaction() as conn:
             conn.execute("DELETE FROM work_queue WHERE ticket_id = ?", (ticket_id,))
+
+    # -- auto-retry accounting ----------------------------------------------
+
+    def get_attempts(self, ticket_id: str, stage: str) -> int:
+        """How many automated re-attempts a ticket has had at ``stage``.
+
+        ``stage`` separates the recovery budgets — e.g. ``"spec"`` for
+        Spec Writer re-drives vs. ``"worker"`` for Failed → Ready for
+        Agent re-queues — so one stage burning its budget doesn't deny
+        the other.
+        """
+        row = self._conn.execute(
+            "SELECT attempts FROM ticket_attempts WHERE ticket_id = ? AND stage = ?",
+            (ticket_id, stage),
+        ).fetchone()
+        return int(row["attempts"]) if row is not None else 0
+
+    def bump_attempt(self, ticket_id: str, stage: str) -> int:
+        """Increment and return the attempt counter for ``(ticket, stage)``."""
+        with self.transaction() as conn:
+            conn.execute(
+                """
+                INSERT INTO ticket_attempts (ticket_id, stage, attempts)
+                VALUES (?, ?, 1)
+                ON CONFLICT(ticket_id, stage) DO UPDATE SET
+                    attempts = attempts + 1
+                """,
+                (ticket_id, stage),
+            )
+        row = self._conn.execute(
+            "SELECT attempts FROM ticket_attempts WHERE ticket_id = ? AND stage = ?",
+            (ticket_id, stage),
+        ).fetchone()
+        return int(row["attempts"]) if row is not None else 0
+
+    # -- In Progress staleness tracking -------------------------------------
+
+    def mark_in_progress_seen(
+        self, ticket_id: str, *, now: datetime | None = None
+    ) -> datetime:
+        """Record (once) when a ticket was first observed In Progress.
+
+        Idempotent: the first observation's timestamp is kept on later
+        calls so the staleness clock measures continuous time in the
+        state, and it survives orchestrator restarts (the row is durable).
+        Returns the stored first-seen timestamp. ``now`` overrides the
+        recorded timestamp (tests use it to age a ticket deterministically).
+        """
+        ts_iso = (now or datetime.now(UTC)).isoformat()
+        with self.transaction() as conn:
+            conn.execute(
+                """
+                INSERT INTO in_progress_seen (ticket_id, first_seen_at)
+                VALUES (?, ?)
+                ON CONFLICT(ticket_id) DO NOTHING
+                """,
+                (ticket_id, ts_iso),
+            )
+        row = self._conn.execute(
+            "SELECT first_seen_at FROM in_progress_seen WHERE ticket_id = ?",
+            (ticket_id,),
+        ).fetchone()
+        if row is None:
+            return datetime.now(UTC)
+        return _parse_dt(row["first_seen_at"]) or datetime.now(UTC)
+
+    def clear_in_progress_seen(self, ticket_id: str) -> None:
+        with self.transaction() as conn:
+            conn.execute(
+                "DELETE FROM in_progress_seen WHERE ticket_id = ?", (ticket_id,)
+            )
+
+    def prune_in_progress_seen(self, keep: Iterable[str]) -> None:
+        """Drop staleness rows for tickets no longer In Progress.
+
+        Called each tick with the set of currently-In Progress tickets so
+        a ticket that left and later re-enters the state restarts its
+        clock instead of inheriting a stale (premature) timestamp.
+        """
+        keep_set = set(keep)
+        existing = self._conn.execute(
+            "SELECT ticket_id FROM in_progress_seen"
+        ).fetchall()
+        to_drop = [r["ticket_id"] for r in existing if r["ticket_id"] not in keep_set]
+        if not to_drop:
+            return
+        with self.transaction() as conn:
+            placeholders = ",".join("?" * len(to_drop))
+            conn.execute(
+                f"DELETE FROM in_progress_seen WHERE ticket_id IN ({placeholders})",
+                to_drop,
+            )
 
     # -- PR events -----------------------------------------------------------
 
