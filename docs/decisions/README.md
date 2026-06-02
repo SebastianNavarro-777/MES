@@ -13,6 +13,7 @@ We follow [MADR](https://adr.github.io/madr/) (Markdown Any Decision Record) for
 | ID | Title | Status | Date |
 |---|---|---|---|
 | [0001](0001-stack-django-react.md) | Stack: Django + DRF + React + Vite | Accepted | 2026-05-04 |
+| [0004](0004-wip-read-api-url.md) | WIP read API URL — wip-owned positions endpoint | Accepted | 2026-06-02 |
 
 ## Rules
 
