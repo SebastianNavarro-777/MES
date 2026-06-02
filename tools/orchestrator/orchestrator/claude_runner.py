@@ -14,9 +14,10 @@ from __future__ import annotations
 
 import asyncio
 import os
-import shutil
 from dataclasses import dataclass
 from pathlib import Path
+
+from .proc_utils import resolve_executable
 
 __all__ = [
     "ClaudeRunResult",
@@ -42,23 +43,12 @@ class ClaudeRunnerError(RuntimeError):
 
 
 def _resolve_binary(name: str) -> str:
-    """Find an executable by name, honouring PATHEXT on Windows.
+    """Resolve the ``claude`` binary to an absolute path for asyncio.
 
-    ``asyncio.create_subprocess_exec`` does NOT search PATH the way
-    ``subprocess.run`` does — on Windows it ignores ``PATHEXT``, so a
-    plain ``"claude"`` lookup misses the actual ``claude.cmd`` shim that
-    npm installs. ``shutil.which`` does the full resolution (PATH +
-    PATHEXT + executable bit on POSIX), returning an absolute path we
-    can hand directly to asyncio.
-
-    Absolute paths are returned unchanged when they're already
-    executable. Bare names that can't be resolved are passed through so
-    the eventual subprocess failure surfaces the expected
-    ``FileNotFoundError`` with the original name in the message — the
-    upstream error is still actionable.
+    Thin wrapper over :func:`proc_utils.resolve_executable`; kept as a
+    named function for the regression tests in ``test_claude_runner.py``.
     """
-    resolved = shutil.which(name)
-    return resolved if resolved else name
+    return resolve_executable(name)
 
 
 class ClaudeRunner:

@@ -17,6 +17,10 @@ import shlex
 from dataclasses import dataclass
 from typing import Any
 
+import httpx
+
+from .proc_utils import resolve_executable
+
 __all__ = [
     "GitHubClient",
     "GitHubClientError",
@@ -54,14 +58,46 @@ class GitHubClientError(RuntimeError):
 
 
 class GitHubClient:
-    """Async wrapper over the ``gh`` CLI.
+    """GitHub access for the orchestrator.
+
+    Most mutating operations shell out to the ``gh`` CLI (so they inherit
+    the user's ``gh auth login``). Read-only PR lookups go over the REST
+    API with ``token`` instead, because the daemon host may not have the
+    ``gh`` binary installed at all — the Claude agents create PRs through
+    the GitHub MCP, not the CLI — yet ``GITHUB_TOKEN`` is always present
+    in live mode.
 
     ``gh_binary`` defaults to ``gh`` on $PATH; tests override it to point
     at a fake script for hermetic runs.
     """
 
-    def __init__(self, *, gh_binary: str = "gh") -> None:
-        self._gh = gh_binary
+    def __init__(
+        self,
+        *,
+        gh_binary: str = "gh",
+        token: str | None = None,
+        api_base: str = "https://api.github.com",
+        client: httpx.AsyncClient | None = None,
+        timeout: float = 30.0,
+    ) -> None:
+        # Resolve to an absolute path so asyncio can spawn it on Windows
+        # (create_subprocess_exec ignores PATHEXT, so a bare "gh" misses
+        # the gh.cmd/gh.exe shim → FileNotFoundError).
+        self._gh = resolve_executable(gh_binary)
+        self._token = token
+        self._api_base = api_base.rstrip("/")
+        self._timeout = timeout
+        self._client = client
+        self._owns_client = client is None
+
+    async def aclose(self) -> None:
+        if self._owns_client and self._client is not None:
+            await self._client.aclose()
+
+    def _http(self) -> httpx.AsyncClient:
+        if self._client is None:
+            self._client = httpx.AsyncClient(timeout=self._timeout)
+        return self._client
 
     # -- low-level subprocess helper ----------------------------------------
 
@@ -153,34 +189,46 @@ class GitHubClient:
         )
 
     async def find_open_pr_for_ticket(
-        self, *, repo: str, ticket_id: str, cwd: str | None = None
+        self, *, repo: str, ticket_id: str
     ) -> PullRequestSummary | None:
         """Return the open PR whose branch belongs to ``ticket_id``, if any.
 
         Used by the Worker pool to tell a *fix* (a ticket re-queued after
         its PR failed review/CI, which already has an open PR) from a
-        *fresh* implementation (a ticket with no PR yet).
+        *fresh* implementation (a ticket with no PR yet). Uses the REST
+        API (not the ``gh`` CLI) so it works on hosts without ``gh``.
         """
-        out = await self._run(
-            "pr",
-            "list",
-            "--repo",
-            repo,
-            "--state",
-            "open",
-            "--json",
-            "number,title,state,url,headRefName,baseRefName,isDraft,labels",
-            cwd=cwd,
+        if not self._token:
+            raise GitHubClientError(
+                "GITHUB_TOKEN required to query open pull requests"
+            )
+        headers = {
+            "Authorization": f"Bearer {self._token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+        response = await self._http().get(
+            f"{self._api_base}/repos/{repo}/pulls",
+            params={"state": "open", "per_page": 100},
+            headers=headers,
+            timeout=self._timeout,
         )
-        data: object = json.loads(out)
+        if response.status_code >= 400:
+            raise GitHubClientError(
+                f"GitHub HTTP {response.status_code}: {response.text[:200]}"
+            )
+        data: object = response.json()
         if not isinstance(data, list):
-            raise GitHubClientError("gh pr list did not return a list")
+            raise GitHubClientError("GitHub pulls endpoint did not return a list")
         for entry in data:
             if not isinstance(entry, dict):
                 continue
-            head_ref = str(entry.get("headRefName", ""))
+            head = entry.get("head")
+            head_ref = str(head.get("ref", "")) if isinstance(head, dict) else ""
             if not branch_matches_ticket(head_ref, ticket_id):
                 continue
+            base = entry.get("base")
+            base_ref = str(base.get("ref", "")) if isinstance(base, dict) else ""
             labels_list = entry.get("labels", [])
             labels: tuple[str, ...] = ()
             if isinstance(labels_list, list):
@@ -192,11 +240,11 @@ class GitHubClient:
             return PullRequestSummary(
                 number=int(entry.get("number", 0)),
                 title=str(entry.get("title", "")),
-                state=str(entry.get("state", "")),
-                url=str(entry.get("url", "")),
+                state=str(entry.get("state", "")).upper(),
+                url=str(entry.get("html_url", "")),
                 head_ref=head_ref,
-                base_ref=str(entry.get("baseRefName", "")),
-                is_draft=bool(entry.get("isDraft", False)),
+                base_ref=base_ref,
+                is_draft=bool(entry.get("draft", False)),
                 labels=labels,
             )
         return None

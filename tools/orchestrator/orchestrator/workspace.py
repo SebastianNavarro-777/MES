@@ -18,6 +18,8 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
+from .proc_utils import resolve_executable
+
 __all__ = [
     "Workspace",
     "WorkspaceError",
@@ -39,10 +41,20 @@ class WorkspaceError(RuntimeError):
 class WorkspaceManager:
     """Manages worktrees for one orchestrator process."""
 
-    def __init__(self, *, repo_root: Path, worktrees_dir: Path) -> None:
+    def __init__(
+        self,
+        *,
+        repo_root: Path,
+        worktrees_dir: Path,
+        git_binary: str = "git",
+    ) -> None:
         self.repo_root = repo_root
         self.worktrees_dir = worktrees_dir
         self.worktrees_dir.mkdir(parents=True, exist_ok=True)
+        # Resolve to an absolute path so asyncio can spawn it on Windows
+        # (create_subprocess_exec ignores PATHEXT → bare "git" can miss
+        # the git shim and raise FileNotFoundError).
+        self._git_bin = resolve_executable(git_binary)
 
     async def create(
         self, ticket_id: str, *, base_branch: str = "main"
@@ -142,7 +154,7 @@ class WorkspaceManager:
 
     async def _git(self, *args: str, cwd: Path) -> str:
         proc = await asyncio.create_subprocess_exec(
-            "git",
+            self._git_bin,
             *args,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,

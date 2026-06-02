@@ -176,7 +176,7 @@ async def run_all(*, env_overrides: dict[str, Any] | None = None) -> int:
             loop.add_signal_handler(sig, _handle_signal)
 
     recolector = Recolector(linear=linear, db=db)
-    github = GitHubClient()
+    github = GitHubClient(token=settings.GITHUB_TOKEN or None)
     worker_pool = WorkerPool(
         settings=settings,
         db=db,
@@ -218,6 +218,7 @@ async def run_all(*, env_overrides: dict[str, Any] | None = None) -> int:
         )
     finally:
         await linear.aclose()
+        await github.aclose()
         db.close()
     return 0
 

@@ -135,11 +135,16 @@ class WorkerPool:
             existing_pr = await self._github.find_open_pr_for_ticket(
                 repo=self._settings.GITHUB_REPO, ticket_id=ticket_id
             )
-        except Exception:
+        except Exception as exc:
             # If we can't tell whether a PR exists, do NOT start a fresh
             # implementation — that could open a second PR. Skip + retry.
-            log.exception(
-                "open-PR lookup failed for %s; skipping this run", ticket_id
+            # Logged concisely (no traceback): the usual cause is a
+            # transient gh hiccup, and a later tick retries. A *persistent*
+            # failure means gh is missing/misconfigured — fix the env.
+            log.warning(
+                "open-PR lookup for %s failed (%s); skipping this run, will retry",
+                ticket_id,
+                exc,
             )
             return None
 

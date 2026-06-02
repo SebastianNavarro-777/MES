@@ -102,7 +102,7 @@ class FakeGitHubClient:
     raise_on_lookup: bool = False
 
     async def find_open_pr_for_ticket(
-        self, *, repo: str, ticket_id: str, cwd: str | None = None
+        self, *, repo: str, ticket_id: str
     ) -> PullRequestSummary | None:
         if self.raise_on_lookup:
             raise RuntimeError("simulated gh failure")
