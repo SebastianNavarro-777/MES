@@ -13,6 +13,7 @@ We follow [MADR](https://adr.github.io/madr/) (Markdown Any Decision Record) for
 | ID | Title | Status | Date |
 |---|---|---|---|
 | [0001](0001-stack-django-react.md) | Stack: Django + DRF + React + Vite | Accepted | 2026-05-04 |
+| [0002](0002-identidad-y-fuente-de-la-orden.md) | Manufacturing order identity and source of record | Accepted | 2026-06-02 |
 
 ## Rules
 
