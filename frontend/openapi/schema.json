@@ -1,0 +1,45 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "NSG MES API",
+    "version": "0.0.0",
+    "description": "Placeholder OpenAPI document for the NSG MES backend.\n\nThis file is the INPUT to the frontend codegen pipeline (`pnpm gen:api`).\nIt is intentionally minimal: as of NSG-19 the backend exposes no business\nendpoints (see docs/generated/api-routes.md, 0 endpoints). Once the Django +\ndrf-spectacular backend exists, regenerate this file with\n`python manage.py spectacular --file frontend/openapi/schema.json` and re-run\n`pnpm gen:api` — DO NOT hand-edit the generated client. NSG-18 (orders) and\nNSG-25 (auth) will replace this with the real contract."
+  },
+  "paths": {
+    "/health/": {
+      "get": {
+        "operationId": "health_retrieve",
+        "description": "Liveness probe. Trivial, domain-free endpoint used to validate the codegen pipeline end-to-end.",
+        "tags": ["health"],
+        "responses": {
+          "200": {
+            "description": "Service is up.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Health" }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Health": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/HealthStatusEnum"
+          }
+        },
+        "required": ["status"]
+      },
+      "HealthStatusEnum": {
+        "enum": ["ok", "degraded"],
+        "type": "string",
+        "description": "* `ok` - Service healthy\n* `degraded` - Service degraded"
+      }
+    }
+  }
+}
