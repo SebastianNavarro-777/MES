@@ -86,6 +86,36 @@ async def test_find_open_pr_without_token_raises() -> None:
         await gh.find_open_pr_for_ticket(repo="acme/mes", ticket_id="NSG-10")
 
 
+@pytest.mark.asyncio
+async def test_check_auth_ok() -> None:
+    async with httpx.AsyncClient() as client:
+        gh = GitHubClient(token="tok", client=client)
+        with respx.mock:
+            respx.get("https://api.github.com/repos/acme/mes").mock(
+                return_value=httpx.Response(200, json={"full_name": "acme/mes"})
+            )
+            status = await gh.check_auth(repo="acme/mes")
+    assert status == "ok"
+
+
+@pytest.mark.asyncio
+async def test_check_auth_reports_invalid_token() -> None:
+    async with httpx.AsyncClient() as client:
+        gh = GitHubClient(token="bad", client=client)
+        with respx.mock:
+            respx.get("https://api.github.com/repos/acme/mes").mock(
+                return_value=httpx.Response(401, json={"message": "Bad credentials"})
+            )
+            status = await gh.check_auth(repo="acme/mes")
+    assert "401" in status
+
+
+@pytest.mark.asyncio
+async def test_check_auth_without_token() -> None:
+    gh = GitHubClient(token=None)
+    assert await gh.check_auth(repo="acme/mes") == "no GITHUB_TOKEN set"
+
+
 @pytest.mark.parametrize(
     "head_ref",
     [

@@ -188,6 +188,38 @@ class GitHubClient:
             labels=labels,
         )
 
+    async def check_auth(self, *, repo: str) -> str:
+        """One-shot REST credential check for startup diagnostics.
+
+        Returns ``"ok"`` when the token can read ``repo``, or a short
+        human-readable diagnostic otherwise. Never raises — startup must
+        not crash just because GitHub is misconfigured.
+        """
+        if not self._token:
+            return "no GITHUB_TOKEN set"
+        if not repo:
+            return "no GITHUB_REPO set"
+        headers = {
+            "Authorization": f"Bearer {self._token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+        try:
+            response = await self._http().get(
+                f"{self._api_base}/repos/{repo}",
+                headers=headers,
+                timeout=self._timeout,
+            )
+        except Exception as exc:  # network, DNS, etc.
+            return f"unreachable ({exc})"
+        if response.status_code == 200:
+            return "ok"
+        if response.status_code == 401:
+            return "token INVALID (401 Bad credentials) — regenerate it"
+        if response.status_code == 404:
+            return f"repo {repo} not found or token lacks access (404)"
+        return f"HTTP {response.status_code}"
+
     async def find_open_pr_for_ticket(
         self, *, repo: str, ticket_id: str
     ) -> PullRequestSummary | None:

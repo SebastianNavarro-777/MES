@@ -98,6 +98,24 @@ async def startup_check(
         except Exception:
             console.print("[red]Linear unreachable[/] — recolector will retry.")
 
+    # GitHub credential check — the Worker pool needs a valid GITHUB_TOKEN
+    # to tell a fix (re-queued PR) from a fresh story over the REST API.
+    # An invalid token would otherwise stall every Worker run silently, so
+    # surface it loudly here.
+    if settings.GITHUB_TOKEN:
+        gh = GitHubClient(token=settings.GITHUB_TOKEN)
+        try:
+            gh_status = await gh.check_auth(repo=settings.GITHUB_REPO)
+        finally:
+            await gh.aclose()
+        if gh_status == "ok":
+            console.print(f"  GitHub  {settings.GITHUB_REPO:20s}  ok")
+        else:
+            console.print(
+                f"[red]GitHub  {gh_status}[/] — Worker fix-mode + fresh runs "
+                f"will skip until GITHUB_TOKEN is fixed."
+            )
+
     workspaces = WorkspaceManager(
         repo_root=repo_root(),
         worktrees_dir=settings.worktrees_path,
