@@ -13,6 +13,7 @@ We follow [MADR](https://adr.github.io/madr/) (Markdown Any Decision Record) for
 | ID | Title | Status | Date |
 |---|---|---|---|
 | [0001](0001-stack-django-react.md) | Stack: Django + DRF + React + Vite | Accepted | 2026-05-04 |
+| [0002](0002-staging-deploy-contract.md) | Staging deploy contract & merging foundational high-risk infra during ramp-up | Accepted | 2026-06-03 |
 
 ## Rules
 
