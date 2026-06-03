@@ -23,6 +23,10 @@ import pytest
 
 from tools.orchestrator.orchestrator.config import Settings
 from tools.orchestrator.orchestrator.db import Database
+from tools.orchestrator.orchestrator.state_machine import (
+    TicketState,
+    inflight_states,
+)
 from tools.orchestrator.orchestrator.trigger_dispatcher import (
     AgentName,
     ArchitectDecision,
@@ -116,6 +120,57 @@ def test_architect_does_not_fire_when_backlog_at_or_above_threshold(
     d_above = _dispatcher(settings, db, backlog=8)
     assert d_at.evaluate_architect().fire is False
     assert d_above.evaluate_architect().fire is False
+
+
+def test_architect_does_not_fire_when_phase_decomposed_with_inflight_work(
+    settings: Settings, db: Database
+) -> None:
+    # AC-1: 0 Stories in Backlog but ~25 spread across in-flight states. The
+    # provider reports the in-flight total (25), well above the threshold (5),
+    # so the Architect must NOT fire even though Backlog alone looks empty.
+    d = _dispatcher(settings, db, backlog=25)
+    decision = d.evaluate_architect()
+    assert decision.fire is False
+    assert decision.backlog_count == 25
+    # The reason must read as "still working", not "empty backlog".
+    assert "in-flight" in decision.reason
+    assert "backlog not exhausted" in decision.reason
+
+
+def test_architect_fires_when_total_inflight_below_threshold(
+    settings: Settings, db: Database
+) -> None:
+    # AC-2: a genuinely low total of unfinished Stories (4 < 5) still fires
+    # the Architect — the broadened semantics do not suppress real top-ups.
+    d = _dispatcher(settings, db, backlog=4)
+    decision = d.evaluate_architect()
+    assert decision.fire is True
+    assert decision.backlog_count == 4
+
+
+def test_architect_does_not_fire_when_only_epics_in_backlog_but_stories_inflight(
+    settings: Settings, db: Database
+) -> None:
+    # AC-3: the only tickets in Backlog are 3 already-decomposed Epics, while
+    # ~25 Stories sit across in-flight states. The orchestrator sums every
+    # in-flight state (epics in Backlog count too, but the in-flight Stories
+    # dominate), so the real workload is far above the threshold and the
+    # Architect must NOT fire. Done/Failed counts are excluded.
+    counts_by_state = {
+        TicketState.BACKLOG.value: 3,  # 3 Epics, zero Stories
+        TicketState.SPEC_DRAFT.value: 2,
+        TicketState.READY_FOR_AGENT.value: 10,
+        TicketState.IN_PROGRESS.value: 8,
+        TicketState.IN_REVIEW.value: 5,
+        TicketState.DONE.value: 40,  # finished — must be ignored
+        TicketState.FAILED.value: 1,  # awaiting recovery — must be ignored
+    }
+    inflight_total = sum(
+        counts_by_state.get(state.value, 0) for state in inflight_states()
+    )
+    assert inflight_total == 28  # 3 + 2 + 10 + 8 + 5; Done(40)/Failed(1) excluded
+    d = _dispatcher(settings, db, backlog=inflight_total)
+    assert d.evaluate_architect().fire is False
 
 
 def test_architect_respects_one_hour_cooldown(
