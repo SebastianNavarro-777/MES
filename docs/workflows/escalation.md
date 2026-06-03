@@ -98,6 +98,11 @@ Si al invocar al Consultant ya hay 3 tickets con label `needs-human-decision` en
 
 Esto previene saturación de la cola humana. Cuando Sebas resuelva uno, el siguiente Consultant que necesite escalar puede crear un nuevo ticket.
 
+**Antes de aplicar un default, dos comprobaciones (evitan defaults espurios):**
+
+- **¿La decisión ya está escalada?** Si uno de los 3 `Question` abiertos ya cubre *exactamente* esta decisión (p. ej. la identidad de la OF ya está abierta como `Question` y una Story hermana topa con la misma bifurcación), **no** se quema un default: se mueve el ticket a `Blocked` enlazándolo al `Question` existente y se espera la respuesta real. El label `applied-default-decision` se reserva para decisiones genuinamente diferidas, no para una que ya está en la cola humana.
+- **¿La opción está pre-autorizada?** Si la opción elegida está **explícitamente pre-autorizada** por el spec, el Epic o un ADR vigente (el ticket dice p. ej. "opción A pre-autorizada por el Architect"), ejecutarla es seguir el plan documentado, no diferir una decisión humana: se ejecuta **sin** aplicar `applied-default-decision`.
+
 ---
 
 ## Después de la respuesta de Sebas

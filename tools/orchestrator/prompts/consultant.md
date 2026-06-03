@@ -54,7 +54,20 @@ Read on demand:
 
 2. **Count open `Question` tickets** in Linear (state ∉ {`Done`, `Cancelled`} AND label = `needs-human-decision`).
 
-3. **If `count >= 3`:** apply the lowest-risk default and return — do NOT create a fourth ticket. Lowest-risk heuristic, in priority order:
+   **2a. Before defaulting, check whether the decision is already escalated.** Read the titles/bodies of the currently-open `Question` tickets. If one of them already covers *this exact decision* (e.g., the OF-identity question is already open as a `Question` while a sibling Story hits the same fork), do **not** burn a default-of-record on a question Sebas is already being asked. Instead, treat the blocking ticket as dependent on that existing Question: transition it to `Blocked`, add a comment linking the existing `Question`, and return:
+   ```python
+   {
+       "verdict": "blocked_on_existing_question",
+       "question_ticket": "NSG-<existing_id>",
+       "rationale": "<one sentence: same decision already pending>",
+       "blocking_action": "<original ticket moved to Blocked, linked to existing Question>",
+   }
+   ```
+   This is strictly better than a default: the ticket waits for the *real* answer instead of guessing, and `applied-default-decision` is reserved for genuinely-deferred decisions. (A default is still correct when the quota is full *and* no open Question covers this decision.)
+
+   **2b. Don't default on a pre-authorized option.** If the invoking agent's chosen/recommended option is **explicitly pre-authorized** by the spec, the Epic, or an existing ADR (the ticket says e.g. "opción A pre-autorizada por el Architect"), then executing it is not a deferred human decision — it is following the documented plan. Return `{"verdict": "pre_authorized", "chosen": "<A|B|C>", "rationale": "<cite where it was pre-authorized>"}` and **do not** apply the `applied-default-decision` label or emit a default-decision event. Reserve that label for cases where a real human decision was actually skipped.
+
+3. **If `count >= 3`** (and neither 2a nor 2b applies): apply the lowest-risk default and return — do NOT create a fourth ticket. Lowest-risk heuristic, in priority order:
    1. Choose the immutable / append-only / non-destructive option (consistent with GP-005).
    2. Choose the option that requires no new external dependency.
    3. Choose the option that defers the decision (e.g., feature-flagged off, behind a config setting).
@@ -123,8 +136,9 @@ NSG-<blocking_ticket_id> ([título del ticket original])
 
 ## Outputs
 
-- Either: a verdict to the invoking agent (no Linear writes), if the question was answerable from docs or if the quota was full.
+- Either: a verdict to the invoking agent (no Linear writes), if the question was answerable from docs, if the quota was full (`default_applied`), or if the chosen option was pre-authorized (`pre_authorized`).
 - Or: 1 new `Question` ticket in Linear with label `needs-human-decision`, AND the blocking ticket moved to `Blocked`.
+- Or: no new ticket, but the blocking ticket moved to `Blocked` and linked to an **already-open** `Question` that covers the same decision (`blocked_on_existing_question`).
 
 You produce **no** code and **no** changes to `docs/`. The Consultant Resolver (`consultant_resolver.md`, a separate prompt invoked by `consultant_resolver.py`) writes ADRs and golden-principle updates **after** Sebas answers; that work is explicitly out of your scope.
 
