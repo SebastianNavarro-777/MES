@@ -116,6 +116,43 @@ async def test_check_auth_without_token() -> None:
     assert await gh.check_auth(repo="acme/mes") == "no GITHUB_TOKEN set"
 
 
+@pytest.mark.asyncio
+async def test_find_merged_pr_skips_closed_unmerged() -> None:
+    """Only a *merged* PR (merged_at set) counts — a closed-without-merge PR
+    on the same ticket branch must be ignored."""
+    payload = [
+        {**_pull(8, "feat/NSG-10-abandoned"), "merged_at": None},
+        {**_pull(9, "feat/NSG-10-shipped"), "merged_at": "2026-06-02T10:00:00Z"},
+    ]
+    async with httpx.AsyncClient() as client:
+        gh = GitHubClient(token="tok", client=client)
+        with respx.mock:
+            respx.get("https://api.github.com/repos/acme/mes/pulls").mock(
+                return_value=httpx.Response(200, json=payload)
+            )
+            pr = await gh.find_merged_pr_for_ticket(
+                repo="acme/mes", ticket_id="NSG-10"
+            )
+    assert pr is not None
+    assert pr.number == 9
+    assert pr.state == "MERGED"
+
+
+@pytest.mark.asyncio
+async def test_find_merged_pr_none_when_only_unmerged() -> None:
+    payload = [{**_pull(8, "feat/NSG-10-abandoned"), "merged_at": None}]
+    async with httpx.AsyncClient() as client:
+        gh = GitHubClient(token="tok", client=client)
+        with respx.mock:
+            respx.get("https://api.github.com/repos/acme/mes/pulls").mock(
+                return_value=httpx.Response(200, json=payload)
+            )
+            pr = await gh.find_merged_pr_for_ticket(
+                repo="acme/mes", ticket_id="NSG-10"
+            )
+    assert pr is None
+
+
 @pytest.mark.parametrize(
     "head_ref",
     [

@@ -120,17 +120,19 @@ async def startup_check(
         repo_root=repo_root(),
         worktrees_dir=settings.worktrees_path,
     )
+    # No Worker runs at startup, so every worktree on disk is residue from
+    # a previous (possibly Ctrl-C'd) run. Purge them so a leftover worktree
+    # can never put a ticket into limbo — the recolector re-enqueues the
+    # work and the Worker creates a fresh worktree.
     try:
-        orphans = await workspaces.list_orphans()
+        purged = await workspaces.purge_all()
     except Exception:
-        orphans = []
-    if orphans:
+        purged = 0
+    if purged:
         console.print(
-            f"[yellow]Reconciliation:[/] "
-            f"{len(orphans)} orphan worktree(s) on disk."
+            f"[yellow]Reconciliation:[/] purged {purged} stale worktree(s) "
+            f"from a previous run."
         )
-        for o in orphans:
-            console.print(f"  {o}")
 
     dispatcher = TriggerDispatcher(
         settings=settings,
@@ -208,7 +210,7 @@ async def run_all(*, env_overrides: dict[str, Any] | None = None) -> int:
     )
     qa = QASmokeDaemon(settings=settings, db=db, linear=linear, claude=claude)
     consultant = ConsultantResolver(
-        settings=settings, db=db, linear=linear, claude=claude
+        settings=settings, db=db, linear=linear, claude=claude, workspaces=workspaces
     )
     spec_writer = SpecWriterDaemon(
         settings=settings, db=db, linear=linear, claude=claude

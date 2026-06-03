@@ -18,12 +18,17 @@ from .claude_runner import ClaudeRunner
 from .config import Settings
 from .db import Database
 from .linear_client import LinearClient
+from .workspace import WorkspaceManager
 
 __all__ = ["ConsultantResolver"]
 
 log = logging.getLogger(__name__)
 
 QUESTION_LABEL = "needs-human-decision"
+
+# ``ticket_attempts`` stage used to mark a resolved Question as already
+# processed, so the daemon doesn't re-run the agent on it every tick.
+_RESOLVER_STAGE = "resolver"
 
 
 class ConsultantResolver:
@@ -34,12 +39,14 @@ class ConsultantResolver:
         db: Database,
         linear: LinearClient,
         claude: ClaudeRunner,
+        workspaces: WorkspaceManager,
         poll_interval_seconds: float = 120.0,
     ) -> None:
         self._settings = settings
         self._db = db
         self._linear = linear
         self._claude = claude
+        self._workspaces = workspaces
         self._interval = poll_interval_seconds
 
     async def run_forever(self, *, stop_event: asyncio.Event | None = None) -> None:
@@ -67,6 +74,11 @@ class ConsultantResolver:
         for issue in done_issues:
             if QUESTION_LABEL not in issue.labels:
                 continue
+            # A resolved Question stays Done + needs-human-decision forever,
+            # so without this guard the daemon would re-run the resolver
+            # agent on it every tick (duplicate ADRs, wasted Claude usage).
+            if self._db.get_attempts(issue.identifier, _RESOLVER_STAGE) > 0:
+                continue
             await self._consume_one(issue.identifier)
 
     async def _consume_one(self, ticket_id: str) -> None:
@@ -82,8 +94,28 @@ class ConsultantResolver:
         # they have opposite write-permissions: the Consultant is read-only
         # and creates Questions, the Consultant Resolver writes docs and
         # opens PRs after Sebas answers.
-        await self._claude.run(
-            agent_name="consultant_resolver",
-            user_prompt=user_prompt,
-            workspace=self._settings.worktrees_path,
-        )
+        #
+        # Runs in a dedicated worktree (not the main checkout): the agent
+        # does `git checkout -b harness/...` + commit + push, and doing
+        # that in the main checkout would leave it stranded on a harness
+        # branch (and risk sweeping unrelated changes into the ADR commit).
+        workspace = await self._workspaces.create(f"resolver-{ticket_id}")
+        try:
+            result = await self._claude.run(
+                agent_name="consultant_resolver",
+                user_prompt=user_prompt,
+                workspace=workspace.path,
+            )
+        finally:
+            await self._workspaces.cleanup(workspace)
+        # Mark processed only on success, so a transient failure retries on
+        # the next tick but a clean resolution is never re-processed.
+        if result.exit_code == 0:
+            self._db.bump_attempt(ticket_id, _RESOLVER_STAGE)
+        else:
+            log.warning(
+                "consultant resolver for %s exited %s: %s",
+                ticket_id,
+                result.exit_code,
+                result.stderr[-500:],
+            )

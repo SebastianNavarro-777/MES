@@ -24,7 +24,7 @@ import logging
 from .claude_runner import ClaudeRunner
 from .config import Settings
 from .db import Database
-from .github_client import GitHubClient
+from .github_client import GitHubClient, PullRequestSummary
 from .linear_client import LinearClient
 from .state_machine import TicketState
 from .workspace import Workspace, WorkspaceManager
@@ -62,6 +62,8 @@ class WorkerPool:
         # later tick re-spawns the same ticket and collides on
         # ``workspace.create`` ("worktree already exists").
         self._in_flight: set[str] = set()
+        # Cached state-name → UUID map, filled on the first transition.
+        self._state_ids: dict[str, str] | None = None
 
     async def run_forever(self, *, stop_event: asyncio.Event | None = None) -> None:
         stop = stop_event or asyncio.Event()
@@ -171,6 +173,26 @@ class WorkerPool:
             )
             return workspace, "worker_fix", user_prompt
 
+        # No open PR. The work may already be MERGED — the Reviewer merged
+        # the PR but crashed before moving the ticket to Ready for QA, so it
+        # got bounced to Failed and re-queued here. Re-implementing would
+        # open a duplicate of code that is already on main. Detect that and
+        # finish the interrupted transition instead.
+        try:
+            merged_pr = await self._github.find_merged_pr_for_ticket(
+                repo=self._settings.GITHUB_REPO, ticket_id=ticket_id
+            )
+        except Exception as exc:
+            log.warning(
+                "merged-PR lookup for %s failed (%s); skipping this run, will retry",
+                ticket_id,
+                exc,
+            )
+            return None
+        if merged_pr is not None:
+            await self._advance_already_merged(ticket_id, merged_pr)
+            return None
+
         # Fresh story: implement from main.
         try:
             workspace = await self._workspaces.create(ticket_id)
@@ -183,3 +205,46 @@ class WorkerPool:
             f"prompts/worker.md."
         )
         return workspace, "worker", user_prompt
+
+    async def _advance_already_merged(
+        self, ticket_id: str, merged_pr: PullRequestSummary
+    ) -> None:
+        """Finish the interrupted move for a ticket whose PR is already merged.
+
+        Transitions the ticket straight to Ready for QA (the merge already
+        happened, so In Review is behind us) and drops it from the queue so
+        no Worker re-implements already-merged code.
+        """
+        pr_number = merged_pr.number
+        issue = await self._linear.get_issue(ticket_id)
+        states = await self._get_state_ids()
+        target = states.get(TicketState.READY_FOR_QA.value)
+        if issue is None or target is None:
+            log.error(
+                "cannot advance already-merged %s: issue or 'Ready for QA' "
+                "state not found",
+                ticket_id,
+            )
+            return
+        try:
+            await self._linear.update_issue_state(issue.id, target)
+            await self._linear.add_comment(
+                issue.id,
+                f"PR #{pr_number} ya estaba mergeado, pero el ticket quedó en "
+                f"Ready for Agent por un cierre a media transición. Lo avanzo a "
+                f"Ready for QA (no se re-implementa para evitar un PR duplicado).",
+            )
+        except Exception:
+            log.exception("advancing already-merged %s failed", ticket_id)
+            return
+        self._db.remove_work_item(ticket_id)
+        log.info(
+            "advanced already-merged %s (PR #%s) to Ready for QA",
+            ticket_id,
+            pr_number,
+        )
+
+    async def _get_state_ids(self) -> dict[str, str]:
+        if self._state_ids is None:
+            self._state_ids = await self._linear.list_team_states()
+        return self._state_ids
