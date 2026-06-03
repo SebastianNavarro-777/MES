@@ -9,9 +9,15 @@ handed to ``create_subprocess_exec``. Regression coverage for the
 
 from __future__ import annotations
 
+import asyncio
 import shutil
 import sys
+from pathlib import Path
+from typing import Any
 
+import pytest
+
+from tools.orchestrator.orchestrator import claude_runner as claude_runner_mod
 from tools.orchestrator.orchestrator.claude_runner import (
     ClaudeRunner,
     _resolve_binary,
@@ -68,3 +74,57 @@ def test_claude_runner_env_var_fallback(monkeypatch: object) -> None:
         assert runner._binary == sys.executable
     finally:
         del _os.environ["CLAUDE_CONFIG_PATH"]
+
+
+# ---------------------------------------------------------------------------
+# Cancellation kills the whole agent process tree (no orphaned grandchildren)
+# ---------------------------------------------------------------------------
+
+
+class _FakeProc:
+    """A subprocess stand-in whose communicate() blocks until cancelled."""
+
+    def __init__(self) -> None:
+        self.pid = 4321
+        self.returncode: int | None = None
+        self._block = asyncio.Event()  # never set → blocks
+
+    async def communicate(self, input: bytes | None = None) -> tuple[bytes, bytes]:
+        await self._block.wait()
+        return b"", b""
+
+    async def wait(self) -> int | None:
+        return self.returncode
+
+
+@pytest.mark.asyncio
+async def test_run_kills_process_tree_on_cancel(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When a Worker run is cancelled (Ctrl-C / shutdown), the agent's whole
+    process tree must be killed so no Vite/esbuild/git grandchild orphans."""
+    (tmp_path / "sleeper.md").write_text("system prompt", encoding="utf-8")
+    runner = ClaudeRunner(claude_binary="python", prompts_dir=tmp_path)
+
+    fake = _FakeProc()
+
+    async def _fake_exec(*_a: Any, **_k: Any) -> _FakeProc:
+        return fake
+
+    killed: list[int | None] = []
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_exec)
+    monkeypatch.setattr(
+        claude_runner_mod, "_kill_process_tree", lambda pid: killed.append(pid)
+    )
+
+    task = asyncio.create_task(
+        runner.run(agent_name="sleeper", user_prompt="hi", workspace=tmp_path)
+    )
+    # Let the run reach the (blocking) communicate() call.
+    for _ in range(100):
+        await asyncio.sleep(0)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert killed == [4321]

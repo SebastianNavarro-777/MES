@@ -96,9 +96,10 @@ class FakeWorkspaceManager:
 
 @dataclass
 class FakeGitHubClient:
-    """Returns a canned open-PR lookup result per ticket."""
+    """Returns canned open/merged PR lookup results per ticket."""
 
     open_pr: PullRequestSummary | None = None
+    merged_pr: PullRequestSummary | None = None
     raise_on_lookup: bool = False
 
     async def find_open_pr_for_ticket(
@@ -108,18 +109,52 @@ class FakeGitHubClient:
             raise RuntimeError("simulated gh failure")
         return self.open_pr
 
+    async def find_merged_pr_for_ticket(
+        self, *, repo: str, ticket_id: str
+    ) -> PullRequestSummary | None:
+        if self.raise_on_lookup:
+            raise RuntimeError("simulated gh failure")
+        return self.merged_pr
 
-def _pr(number: int, head_ref: str) -> PullRequestSummary:
+
+def _pr(number: int, head_ref: str, *, state: str = "OPEN") -> PullRequestSummary:
     return PullRequestSummary(
         number=number,
         title="t",
-        state="OPEN",
+        state=state,
         url=f"https://example/pr/{number}",
         head_ref=head_ref,
         base_ref="main",
         is_draft=False,
         labels=(),
     )
+
+
+@dataclass
+class _Issue:
+    id: str
+    identifier: str
+
+
+@dataclass
+class FakeLinear:
+    """Minimal Linear stand-in for the already-merged advance path."""
+
+    state_ids: dict[str, str] = field(default_factory=dict)
+    transitions: list[tuple[str, str]] = field(default_factory=list)
+    comments: list[tuple[str, str]] = field(default_factory=list)
+
+    async def get_issue(self, identifier: str) -> _Issue:
+        return _Issue(id=f"uuid-{identifier}", identifier=identifier)
+
+    async def list_team_states(self) -> dict[str, str]:
+        return dict(self.state_ids)
+
+    async def update_issue_state(self, issue_id: str, new_state_id: str) -> None:
+        self.transitions.append((issue_id, new_state_id))
+
+    async def add_comment(self, issue_id: str, body: str) -> None:
+        self.comments.append((issue_id, body))
 
 
 class _NoLinear:
@@ -139,11 +174,12 @@ def _make_pool(
     claude: FakeClaudeRunner,
     workspaces: FakeWorkspaceManager,
     github: FakeGitHubClient | None = None,
+    linear: FakeLinear | None = None,
 ) -> WorkerPool:
     return WorkerPool(
         settings=settings,
         db=db,
-        linear=cast(LinearClient, _NoLinear()),
+        linear=cast(LinearClient, linear or _NoLinear()),
         claude=cast(ClaudeRunner, claude),
         workspaces=cast(WorkspaceManager, workspaces),
         github=cast(GitHubClient, github or FakeGitHubClient()),
@@ -294,4 +330,36 @@ async def test_gh_lookup_failure_skips_run_and_keeps_ticket_queued(
     assert workspaces.created_from_branch == []
     # Ticket stays queued so a later tick retries it.
     assert len(db.list_work_items(state=TicketState.READY_FOR_AGENT.value)) == 1
+    assert pool._in_flight == set()
+
+
+@pytest.mark.asyncio
+async def test_already_merged_pr_advances_to_ready_for_qa_without_rerun(
+    tmp_path: Path, db: Database
+) -> None:
+    """A ticket re-queued with NO open PR but an *already-merged* PR (the
+    Reviewer merged then crashed before Ready for QA) must NOT be
+    re-implemented — finish the move to Ready for QA instead."""
+    settings = Settings(WORKTREES_DIR=str(tmp_path / "wt"))
+    db.enqueue("NSG-10", TicketState.READY_FOR_AGENT.value)
+    claude = FakeClaudeRunner()
+    workspaces = FakeWorkspaceManager()
+    github = FakeGitHubClient(
+        open_pr=None,
+        merged_pr=_pr(7, "feat/NSG-10-add-orders", state="MERGED"),
+    )
+    linear = FakeLinear(state_ids={"Ready for QA": "state-qa"})
+    pool = _make_pool(settings, db, claude, workspaces, github, linear)
+
+    await pool.tick()
+
+    # No implementation run at all.
+    assert claude.spawns == []
+    assert workspaces.created == []
+    assert workspaces.created_from_branch == []
+    # Ticket advanced to Ready for QA and dropped from the queue.
+    assert linear.transitions == [("uuid-NSG-10", "state-qa")]
+    assert len(linear.comments) == 1
+    assert "#7" in linear.comments[0][1]
+    assert db.list_work_items(state=TicketState.READY_FOR_AGENT.value) == []
     assert pool._in_flight == set()

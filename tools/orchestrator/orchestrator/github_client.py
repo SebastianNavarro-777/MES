@@ -230,9 +230,30 @@ class GitHubClient:
         *fresh* implementation (a ticket with no PR yet). Uses the REST
         API (not the ``gh`` CLI) so it works on hosts without ``gh``.
         """
+        return await self._find_pr(
+            repo=repo, ticket_id=ticket_id, state="open", require_merged=False
+        )
+
+    async def find_merged_pr_for_ticket(
+        self, *, repo: str, ticket_id: str
+    ) -> PullRequestSummary | None:
+        """Return the merged PR whose branch belonged to ``ticket_id``, if any.
+
+        Used by the Worker pool to detect work that is *already merged* — a
+        ticket left in ``Ready for Agent`` because the Reviewer merged the
+        PR but crashed before moving it to ``Ready for QA``. Re-implementing
+        it would open a duplicate PR; instead the pool finishes the move.
+        """
+        return await self._find_pr(
+            repo=repo, ticket_id=ticket_id, state="closed", require_merged=True
+        )
+
+    async def _find_pr(
+        self, *, repo: str, ticket_id: str, state: str, require_merged: bool
+    ) -> PullRequestSummary | None:
         if not self._token:
             raise GitHubClientError(
-                "GITHUB_TOKEN required to query open pull requests"
+                "GITHUB_TOKEN required to query pull requests"
             )
         headers = {
             "Authorization": f"Bearer {self._token}",
@@ -241,7 +262,12 @@ class GitHubClient:
         }
         response = await self._http().get(
             f"{self._api_base}/repos/{repo}/pulls",
-            params={"state": "open", "per_page": 100},
+            params={
+                "state": state,
+                "per_page": 100,
+                "sort": "updated",
+                "direction": "desc",
+            },
             headers=headers,
             timeout=self._timeout,
         )
@@ -254,6 +280,9 @@ class GitHubClient:
             raise GitHubClientError("GitHub pulls endpoint did not return a list")
         for entry in data:
             if not isinstance(entry, dict):
+                continue
+            merged_at = entry.get("merged_at")
+            if require_merged and not merged_at:
                 continue
             head = entry.get("head")
             head_ref = str(head.get("ref", "")) if isinstance(head, dict) else ""
@@ -269,10 +298,11 @@ class GitHubClient:
                     for label in labels_list
                     if isinstance(label, dict)
                 )
+            pr_state = "MERGED" if merged_at else str(entry.get("state", "")).upper()
             return PullRequestSummary(
                 number=int(entry.get("number", 0)),
                 title=str(entry.get("title", "")),
-                state=str(entry.get("state", "")).upper(),
+                state=pr_state,
                 url=str(entry.get("html_url", "")),
                 head_ref=head_ref,
                 base_ref=base_ref,
