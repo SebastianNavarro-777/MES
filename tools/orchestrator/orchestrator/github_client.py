@@ -17,11 +17,28 @@ import shlex
 from dataclasses import dataclass
 from typing import Any
 
+import httpx
+
+from .proc_utils import resolve_executable
+
 __all__ = [
     "GitHubClient",
     "GitHubClientError",
     "PullRequestSummary",
+    "branch_matches_ticket",
 ]
+
+
+def branch_matches_ticket(head_ref: str, ticket_id: str) -> bool:
+    """Whether a PR head branch belongs to a ticket.
+
+    Worker branches are ``<type>/<TICKET-ID>-<slug>`` (``feat``/``fix``/
+    ``refactor``/``harness``) or occasionally bare ``<TICKET-ID>-<slug>``.
+    We match the ticket segment with a boundary so ``NSG-1`` does not
+    match ``NSG-10``'s branch.
+    """
+    segment = head_ref.split("/")[-1]
+    return segment == ticket_id or segment.startswith(f"{ticket_id}-")
 
 
 @dataclass(frozen=True)
@@ -41,14 +58,46 @@ class GitHubClientError(RuntimeError):
 
 
 class GitHubClient:
-    """Async wrapper over the ``gh`` CLI.
+    """GitHub access for the orchestrator.
+
+    Most mutating operations shell out to the ``gh`` CLI (so they inherit
+    the user's ``gh auth login``). Read-only PR lookups go over the REST
+    API with ``token`` instead, because the daemon host may not have the
+    ``gh`` binary installed at all — the Claude agents create PRs through
+    the GitHub MCP, not the CLI — yet ``GITHUB_TOKEN`` is always present
+    in live mode.
 
     ``gh_binary`` defaults to ``gh`` on $PATH; tests override it to point
     at a fake script for hermetic runs.
     """
 
-    def __init__(self, *, gh_binary: str = "gh") -> None:
-        self._gh = gh_binary
+    def __init__(
+        self,
+        *,
+        gh_binary: str = "gh",
+        token: str | None = None,
+        api_base: str = "https://api.github.com",
+        client: httpx.AsyncClient | None = None,
+        timeout: float = 30.0,
+    ) -> None:
+        # Resolve to an absolute path so asyncio can spawn it on Windows
+        # (create_subprocess_exec ignores PATHEXT, so a bare "gh" misses
+        # the gh.cmd/gh.exe shim → FileNotFoundError).
+        self._gh = resolve_executable(gh_binary)
+        self._token = token
+        self._api_base = api_base.rstrip("/")
+        self._timeout = timeout
+        self._client = client
+        self._owns_client = client is None
+
+    async def aclose(self) -> None:
+        if self._owns_client and self._client is not None:
+            await self._client.aclose()
+
+    def _http(self) -> httpx.AsyncClient:
+        if self._client is None:
+            self._client = httpx.AsyncClient(timeout=self._timeout)
+        return self._client
 
     # -- low-level subprocess helper ----------------------------------------
 
@@ -138,6 +187,129 @@ class GitHubClient:
             is_draft=bool(data.get("isDraft", False)),
             labels=labels,
         )
+
+    async def check_auth(self, *, repo: str) -> str:
+        """One-shot REST credential check for startup diagnostics.
+
+        Returns ``"ok"`` when the token can read ``repo``, or a short
+        human-readable diagnostic otherwise. Never raises — startup must
+        not crash just because GitHub is misconfigured.
+        """
+        if not self._token:
+            return "no GITHUB_TOKEN set"
+        if not repo:
+            return "no GITHUB_REPO set"
+        headers = {
+            "Authorization": f"Bearer {self._token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+        try:
+            response = await self._http().get(
+                f"{self._api_base}/repos/{repo}",
+                headers=headers,
+                timeout=self._timeout,
+            )
+        except Exception as exc:  # network, DNS, etc.
+            return f"unreachable ({exc})"
+        if response.status_code == 200:
+            return "ok"
+        if response.status_code == 401:
+            return "token INVALID (401 Bad credentials) — regenerate it"
+        if response.status_code == 404:
+            return f"repo {repo} not found or token lacks access (404)"
+        return f"HTTP {response.status_code}"
+
+    async def find_open_pr_for_ticket(
+        self, *, repo: str, ticket_id: str
+    ) -> PullRequestSummary | None:
+        """Return the open PR whose branch belongs to ``ticket_id``, if any.
+
+        Used by the Worker pool to tell a *fix* (a ticket re-queued after
+        its PR failed review/CI, which already has an open PR) from a
+        *fresh* implementation (a ticket with no PR yet). Uses the REST
+        API (not the ``gh`` CLI) so it works on hosts without ``gh``.
+        """
+        return await self._find_pr(
+            repo=repo, ticket_id=ticket_id, state="open", require_merged=False
+        )
+
+    async def find_merged_pr_for_ticket(
+        self, *, repo: str, ticket_id: str
+    ) -> PullRequestSummary | None:
+        """Return the merged PR whose branch belonged to ``ticket_id``, if any.
+
+        Used by the Worker pool to detect work that is *already merged* — a
+        ticket left in ``Ready for Agent`` because the Reviewer merged the
+        PR but crashed before moving it to ``Ready for QA``. Re-implementing
+        it would open a duplicate PR; instead the pool finishes the move.
+        """
+        return await self._find_pr(
+            repo=repo, ticket_id=ticket_id, state="closed", require_merged=True
+        )
+
+    async def _find_pr(
+        self, *, repo: str, ticket_id: str, state: str, require_merged: bool
+    ) -> PullRequestSummary | None:
+        if not self._token:
+            raise GitHubClientError(
+                "GITHUB_TOKEN required to query pull requests"
+            )
+        headers = {
+            "Authorization": f"Bearer {self._token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+        response = await self._http().get(
+            f"{self._api_base}/repos/{repo}/pulls",
+            params={
+                "state": state,
+                "per_page": 100,
+                "sort": "updated",
+                "direction": "desc",
+            },
+            headers=headers,
+            timeout=self._timeout,
+        )
+        if response.status_code >= 400:
+            raise GitHubClientError(
+                f"GitHub HTTP {response.status_code}: {response.text[:200]}"
+            )
+        data: object = response.json()
+        if not isinstance(data, list):
+            raise GitHubClientError("GitHub pulls endpoint did not return a list")
+        for entry in data:
+            if not isinstance(entry, dict):
+                continue
+            merged_at = entry.get("merged_at")
+            if require_merged and not merged_at:
+                continue
+            head = entry.get("head")
+            head_ref = str(head.get("ref", "")) if isinstance(head, dict) else ""
+            if not branch_matches_ticket(head_ref, ticket_id):
+                continue
+            base = entry.get("base")
+            base_ref = str(base.get("ref", "")) if isinstance(base, dict) else ""
+            labels_list = entry.get("labels", [])
+            labels: tuple[str, ...] = ()
+            if isinstance(labels_list, list):
+                labels = tuple(
+                    str(label.get("name", ""))
+                    for label in labels_list
+                    if isinstance(label, dict)
+                )
+            pr_state = "MERGED" if merged_at else str(entry.get("state", "")).upper()
+            return PullRequestSummary(
+                number=int(entry.get("number", 0)),
+                title=str(entry.get("title", "")),
+                state=pr_state,
+                url=str(entry.get("html_url", "")),
+                head_ref=head_ref,
+                base_ref=base_ref,
+                is_draft=bool(entry.get("draft", False)),
+                labels=labels,
+            )
+        return None
 
     async def merge_pr(
         self,

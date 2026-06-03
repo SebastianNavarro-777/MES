@@ -52,6 +52,8 @@ class FakeLinearClient:
     state_ids: dict[str, str] = field(default_factory=dict)
     transitions: list[_Transition] = field(default_factory=list)
     raise_on_transition: bool = False
+    label_updates: list[tuple[str, list[str]]] = field(default_factory=list)
+    comments: list[tuple[str, str]] = field(default_factory=list)
 
     async def list_issues_by_state(self, state: str) -> list[Issue]:
         return list(self.issues_by_state.get(state, []))
@@ -63,6 +65,17 @@ class FakeLinearClient:
         if self.raise_on_transition:
             raise RuntimeError("simulated transition failure")
         self.transitions.append(_Transition(issue_id, new_state_id))
+
+    async def ensure_labels(self, names: list[str]) -> dict[str, str]:
+        return {name: f"label-{name}" for name in names}
+
+    async def update_issue_labels(
+        self, issue_id: str, label_ids: list[str]
+    ) -> None:
+        self.label_updates.append((issue_id, list(label_ids)))
+
+    async def add_comment(self, issue_id: str, body: str) -> None:
+        self.comments.append((issue_id, body))
 
 
 @dataclass
@@ -394,3 +407,99 @@ async def test_in_flight_ticket_is_not_repicked(
     await daemon.tick()
     assert claude.spawns == []
     assert linear.transitions == []
+
+
+# ---------------------------------------------------------------------------
+# Orphaned Spec Draft recovery
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_redrives_orphaned_spec_draft_without_transitioning(
+    settings: Settings, db: Database
+) -> None:
+    """A ticket stuck in Spec Draft (prior agent run died before reaching
+    Ready for Agent) gets the agent re-spawned, with no Backlog → Spec
+    Draft transition (it is already there)."""
+    linear = FakeLinearClient(
+        issues_by_state={
+            "Spec Draft": [_issue("NSG-7", labels=("type:story",))],
+        },
+        state_ids=_spec_draft_state_ids(),
+    )
+    claude = FakeClaudeRunner()
+    daemon = _make_daemon(settings, db, linear, claude)
+    await daemon.tick()
+    assert linear.transitions == []  # already in Spec Draft
+    assert len(claude.spawns) == 1
+    assert "NSG-7" in claude.spawns[0].user_prompt
+    assert db.get_attempts("NSG-7", "spec") == 1
+
+
+@pytest.mark.asyncio
+async def test_backlog_has_priority_over_orphaned_spec_draft(
+    settings: Settings, db: Database
+) -> None:
+    """Fresh Backlog work drains before we spend a tick re-driving a
+    stranded Spec Draft."""
+    linear = FakeLinearClient(
+        issues_by_state={
+            "Backlog": [_issue("NSG-5", labels=("type:story",))],
+            "Spec Draft": [_issue("NSG-7", labels=("type:story",))],
+        },
+        state_ids=_spec_draft_state_ids(),
+    )
+    claude = FakeClaudeRunner()
+    daemon = _make_daemon(settings, db, linear, claude)
+    await daemon.tick()
+    assert linear.transitions == [_Transition("uuid-NSG-5", "state-spec-draft")]
+    assert len(claude.spawns) == 1
+    assert "NSG-5" in claude.spawns[0].user_prompt
+    assert db.get_attempts("NSG-7", "spec") == 0  # orphan untouched this tick
+
+
+@pytest.mark.asyncio
+async def test_orphaned_spec_draft_escalates_after_budget(
+    tmp_path: Path, db: Database
+) -> None:
+    """Once a Spec Draft has burned its retry budget it is labelled
+    needs-human and the agent is not spawned again."""
+    settings = Settings(WORKTREES_DIR=str(tmp_path / "wt"), MAX_AUTO_RETRIES=1)
+    linear = FakeLinearClient(
+        issues_by_state={
+            "Spec Draft": [_issue("NSG-7", labels=("type:story",))],
+        },
+        state_ids=_spec_draft_state_ids(),
+    )
+    claude = FakeClaudeRunner()
+    daemon = _make_daemon(settings, db, linear, claude)
+    db.bump_attempt("NSG-7", "spec")  # already at the limit (MAX=1)
+
+    await daemon.tick()
+
+    assert claude.spawns == []  # not re-driven
+    assert len(linear.label_updates) == 1
+    issue_id, label_ids = linear.label_updates[0]
+    assert issue_id == "uuid-NSG-7"
+    assert "label-needs-human" in label_ids
+    assert len(linear.comments) == 1
+
+
+@pytest.mark.asyncio
+async def test_needs_human_spec_draft_is_not_repicked(
+    settings: Settings, db: Database
+) -> None:
+    """A Spec Draft already escalated to a human is left alone."""
+    linear = FakeLinearClient(
+        issues_by_state={
+            "Spec Draft": [
+                _issue("NSG-7", labels=("type:story", "needs-human"))
+            ],
+        },
+        state_ids=_spec_draft_state_ids(),
+    )
+    claude = FakeClaudeRunner()
+    daemon = _make_daemon(settings, db, linear, claude)
+    await daemon.tick()
+    assert claude.spawns == []
+    assert linear.label_updates == []

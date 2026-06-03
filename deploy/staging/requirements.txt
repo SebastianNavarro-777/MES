@@ -1,0 +1,13 @@
+# Runtime dependencies for the staging Django image ONLY.
+#
+# Kept separate from the repo's pyproject.toml on purpose: the root project
+# is the agent orchestrator/harness, and pinning Django there would change
+# the harness venv, CI sync, and mypy/ruff scope. The staging app image is
+# built from this file so its dependency surface stays isolated.
+#
+# Pins are conservative lower bounds; the image rebuilds from a merge SHA on
+# every deploy, so reproducibility comes from the SHA, not a lockfile here.
+Django>=5.0,<6.0
+gunicorn>=22.0
+psycopg[binary]>=3.1
+redis>=5.0

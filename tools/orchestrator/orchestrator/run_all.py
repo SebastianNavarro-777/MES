@@ -22,6 +22,8 @@ from .claude_runner import ClaudeRunner
 from .config import Settings, repo_root
 from .consultant_resolver import ConsultantResolver
 from .db import Database
+from .failed_recovery import FailedRecoveryDaemon
+from .github_client import GitHubClient
 from .linear_client import LinearClient
 from .qa_smoke_runner import QASmokeDaemon
 from .recolector import Recolector
@@ -79,31 +81,58 @@ async def startup_check(
     if linear is not None:
         try:
             for state in [
+                TicketState.SPEC_DRAFT,
                 TicketState.READY_FOR_AGENT,
+                TicketState.IN_PROGRESS,
                 TicketState.IN_REVIEW,
                 TicketState.READY_FOR_QA,
-                TicketState.SPEC_DRAFT,
+                TicketState.FAILED,
             ]:
                 count = await linear.count_issues_by_state(state.value)
                 console.print(f"  Linear  {state.value:20s}  {count}")
+            # All three stuck states self-heal: spec_writer_runner re-drives
+            # orphaned Spec Drafts, and failed_recovery re-queues Failed
+            # tickets immediately and stale In Progress orphans once they
+            # pass IN_PROGRESS_GRACE_SECONDS — all bounded by MAX_AUTO_RETRIES
+            # before a `needs-human` label stops the loop.
         except Exception:
             console.print("[red]Linear unreachable[/] — recolector will retry.")
+
+    # GitHub credential check — the Worker pool needs a valid GITHUB_TOKEN
+    # to tell a fix (re-queued PR) from a fresh story over the REST API.
+    # An invalid token would otherwise stall every Worker run silently, so
+    # surface it loudly here.
+    if settings.GITHUB_TOKEN:
+        gh = GitHubClient(token=settings.GITHUB_TOKEN)
+        try:
+            gh_status = await gh.check_auth(repo=settings.GITHUB_REPO)
+        finally:
+            await gh.aclose()
+        if gh_status == "ok":
+            console.print(f"  GitHub  {settings.GITHUB_REPO:20s}  ok")
+        else:
+            console.print(
+                f"[red]GitHub  {gh_status}[/] — Worker fix-mode + fresh runs "
+                f"will skip until GITHUB_TOKEN is fixed."
+            )
 
     workspaces = WorkspaceManager(
         repo_root=repo_root(),
         worktrees_dir=settings.worktrees_path,
     )
+    # No Worker runs at startup, so every worktree on disk is residue from
+    # a previous (possibly Ctrl-C'd) run. Purge them so a leftover worktree
+    # can never put a ticket into limbo — the recolector re-enqueues the
+    # work and the Worker creates a fresh worktree.
     try:
-        orphans = await workspaces.list_orphans()
+        purged = await workspaces.purge_all()
     except Exception:
-        orphans = []
-    if orphans:
+        purged = 0
+    if purged:
         console.print(
-            f"[yellow]Reconciliation:[/] "
-            f"{len(orphans)} orphan worktree(s) on disk."
+            f"[yellow]Reconciliation:[/] purged {purged} stale worktree(s) "
+            f"from a previous run."
         )
-        for o in orphans:
-            console.print(f"  {o}")
 
     dispatcher = TriggerDispatcher(
         settings=settings,
@@ -167,22 +196,27 @@ async def run_all(*, env_overrides: dict[str, Any] | None = None) -> int:
             loop.add_signal_handler(sig, _handle_signal)
 
     recolector = Recolector(linear=linear, db=db)
+    github = GitHubClient(token=settings.GITHUB_TOKEN or None)
     worker_pool = WorkerPool(
         settings=settings,
         db=db,
         linear=linear,
         claude=claude,
         workspaces=workspaces,
+        github=github,
     )
     reviewer = ReviewerDaemon(
         settings=settings, db=db, linear=linear, claude=claude
     )
     qa = QASmokeDaemon(settings=settings, db=db, linear=linear, claude=claude)
     consultant = ConsultantResolver(
-        settings=settings, db=db, linear=linear, claude=claude
+        settings=settings, db=db, linear=linear, claude=claude, workspaces=workspaces
     )
     spec_writer = SpecWriterDaemon(
         settings=settings, db=db, linear=linear, claude=claude
+    )
+    failed_recovery = FailedRecoveryDaemon(
+        settings=settings, db=db, linear=linear
     )
 
     try:
@@ -193,6 +227,7 @@ async def run_all(*, env_overrides: dict[str, Any] | None = None) -> int:
             qa.run_forever(stop_event=stop_event),
             consultant.run_forever(stop_event=stop_event),
             spec_writer.run_forever(stop_event=stop_event),
+            failed_recovery.run_forever(stop_event=stop_event),
             _trigger_loop(
                 settings=settings,
                 db=db,
@@ -203,6 +238,7 @@ async def run_all(*, env_overrides: dict[str, Any] | None = None) -> int:
         )
     finally:
         await linear.aclose()
+        await github.aclose()
         db.close()
     return 0
 

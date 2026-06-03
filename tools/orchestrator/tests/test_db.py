@@ -9,6 +9,7 @@ learning counter.
 from __future__ import annotations
 
 from collections.abc import Iterator
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -103,3 +104,70 @@ def test_record_learning_event_remains_non_idempotent(db: Database) -> None:
     assert b > 0
     assert a != b
     assert len(db.list_learning_events()) == 2
+
+
+# ---------------------------------------------------------------------------
+# ticket_attempts — bounded auto-retry accounting
+# ---------------------------------------------------------------------------
+
+
+def test_get_attempts_is_zero_for_unknown_ticket(db: Database) -> None:
+    assert db.get_attempts("NSG-99", "worker") == 0
+
+
+def test_bump_attempt_increments_and_returns_new_value(db: Database) -> None:
+    assert db.bump_attempt("NSG-99", "worker") == 1
+    assert db.bump_attempt("NSG-99", "worker") == 2
+    assert db.get_attempts("NSG-99", "worker") == 2
+
+
+def test_attempt_stages_are_independent(db: Database) -> None:
+    """Spec re-drives and Worker re-queues keep separate budgets so one
+    exhausting doesn't deny the other."""
+    db.bump_attempt("NSG-99", "spec")
+    db.bump_attempt("NSG-99", "spec")
+    db.bump_attempt("NSG-99", "worker")
+    assert db.get_attempts("NSG-99", "spec") == 2
+    assert db.get_attempts("NSG-99", "worker") == 1
+
+
+def test_attempts_are_per_ticket(db: Database) -> None:
+    db.bump_attempt("NSG-1", "worker")
+    assert db.get_attempts("NSG-1", "worker") == 1
+    assert db.get_attempts("NSG-2", "worker") == 0
+
+
+# ---------------------------------------------------------------------------
+# in_progress_seen — staleness tracking for orphan recovery
+# ---------------------------------------------------------------------------
+
+
+def test_mark_in_progress_seen_is_idempotent(db: Database) -> None:
+    """The first observation's timestamp is kept across calls so the
+    staleness clock measures continuous time in the state."""
+    old = datetime.now(UTC) - timedelta(hours=1)
+    first = db.mark_in_progress_seen("NSG-10", now=old)
+    second = db.mark_in_progress_seen("NSG-10")  # later call keeps the old ts
+    assert first == old
+    assert second == old
+
+
+def test_clear_in_progress_seen_resets_the_clock(db: Database) -> None:
+    old = datetime.now(UTC) - timedelta(hours=1)
+    db.mark_in_progress_seen("NSG-10", now=old)
+    db.clear_in_progress_seen("NSG-10")
+    fresh = db.mark_in_progress_seen("NSG-10")
+    assert fresh > old  # row was gone, so a new timestamp was recorded
+
+
+def test_prune_in_progress_seen_drops_tickets_not_in_keep_set(
+    db: Database,
+) -> None:
+    old = datetime.now(UTC) - timedelta(hours=1)
+    db.mark_in_progress_seen("NSG-10", now=old)
+    db.mark_in_progress_seen("NSG-11", now=old)
+    # NSG-11 has left In Progress; only NSG-10 is still there.
+    db.prune_in_progress_seen(["NSG-10"])
+    # NSG-10 keeps its old timestamp; NSG-11's clock was reset.
+    assert db.mark_in_progress_seen("NSG-10") == old
+    assert db.mark_in_progress_seen("NSG-11") > old

@@ -50,8 +50,12 @@ from tools.orchestrator.seed.initial_tickets import SEEDS  # noqa: E402
 #   - low-risk / high-risk: control Reviewer escalation policy.
 #   - applied-default-decision: marks Epics created under a Consultant
 #     fallback verdict (3-question backlog) so the human can audit later.
+#   - needs-human: the recovery daemons apply this when a ticket exhausts
+#     its auto-retry budget (spec_writer_runner.py / failed_recovery.py),
+#     so the loops stop and a human picks it up.
 ROUTING_LABELS: tuple[str, ...] = (
     "needs-human-decision",
+    "needs-human",
     "low-risk",
     "high-risk",
     "harness-fix",

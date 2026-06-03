@@ -13,10 +13,14 @@ workspace.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
-import shutil
+import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
+
+from .proc_utils import resolve_executable
 
 __all__ = [
     "ClaudeRunResult",
@@ -27,6 +31,41 @@ __all__ = [
 # The orchestrator's prompts dir is at tools/orchestrator/prompts/, relative
 # to this file's package root. Resolve once at import time.
 PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
+
+
+def _kill_process_tree(pid: int | None) -> None:
+    """Kill ``pid`` and *all* its descendants.
+
+    Killing only the direct child (``proc.kill()``) is not enough: a
+    headless agent spawns its own grandchildren (a Vite dev server +
+    esbuild for UI evidence, ``git``, ``npx``...). On Ctrl-C those
+    grandchildren survive and keep holding worktree directories open,
+    blocking cleanup and the next run. We kill the whole tree instead:
+
+    * Windows: ``taskkill /T`` walks the child tree by parent-PID.
+    * POSIX: the child is started in its own session (``start_new_session``)
+      so a single ``killpg`` takes out the whole group.
+    """
+    if pid is None:
+        return
+    if sys.platform == "win32":
+        with contextlib.suppress(Exception):
+            subprocess.run(
+                ["taskkill", "/PID", str(pid), "/T", "/F"],
+                capture_output=True,
+                timeout=10,
+            )
+    else:
+        import signal as _signal
+
+        with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
+            os.killpg(os.getpgid(pid), _signal.SIGKILL)
+
+
+# POSIX: put each agent in its own session/process group so we can kill the
+# whole tree with one ``killpg``. On Windows this is a no-op (the tree is
+# resolved via ``taskkill /T`` instead), so passing False there is harmless.
+_START_NEW_SESSION: bool = sys.platform != "win32"
 
 
 @dataclass(frozen=True)
@@ -42,23 +81,12 @@ class ClaudeRunnerError(RuntimeError):
 
 
 def _resolve_binary(name: str) -> str:
-    """Find an executable by name, honouring PATHEXT on Windows.
+    """Resolve the ``claude`` binary to an absolute path for asyncio.
 
-    ``asyncio.create_subprocess_exec`` does NOT search PATH the way
-    ``subprocess.run`` does — on Windows it ignores ``PATHEXT``, so a
-    plain ``"claude"`` lookup misses the actual ``claude.cmd`` shim that
-    npm installs. ``shutil.which`` does the full resolution (PATH +
-    PATHEXT + executable bit on POSIX), returning an absolute path we
-    can hand directly to asyncio.
-
-    Absolute paths are returned unchanged when they're already
-    executable. Bare names that can't be resolved are passed through so
-    the eventual subprocess failure surfaces the expected
-    ``FileNotFoundError`` with the original name in the message — the
-    upstream error is still actionable.
+    Thin wrapper over :func:`proc_utils.resolve_executable`; kept as a
+    named function for the regression tests in ``test_claude_runner.py``.
     """
-    resolved = shutil.which(name)
-    return resolved if resolved else name
+    return resolve_executable(name)
 
 
 class ClaudeRunner:
@@ -131,6 +159,7 @@ class ClaudeRunner:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=workspace,
+            start_new_session=_START_NEW_SESSION,
         )
         loop = asyncio.get_running_loop()
         start = loop.time()
@@ -140,14 +169,21 @@ class ClaudeRunner:
                 timeout=timeout,
             )
         except TimeoutError:
-            proc.kill()
-            await proc.wait()
+            _kill_process_tree(proc.pid)
+            with contextlib.suppress(Exception):
+                await proc.wait()
             return ClaudeRunResult(
                 exit_code=124,  # standard timeout exit code
                 stdout="",
                 stderr=f"claude run timed out after {timeout}s",
                 duration_seconds=timeout,
             )
+        except asyncio.CancelledError:
+            # Shutdown (Ctrl-C) or a cancelled worker. Kill the whole agent
+            # tree so no Vite/esbuild/git grandchild is left orphaned
+            # holding a worktree open, then propagate the cancellation.
+            _kill_process_tree(proc.pid)
+            raise
         return ClaudeRunResult(
             exit_code=proc.returncode if proc.returncode is not None else -1,
             stdout=stdout_b.decode("utf-8", errors="replace"),
