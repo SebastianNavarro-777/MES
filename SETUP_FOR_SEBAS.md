@@ -238,7 +238,7 @@ uv sync
 
 Esto crea `.venv/` con Python 3.12 e instala:
 - **Runtime** (`[project.dependencies]`): httpx, rich, pydantic, pydantic-settings.
-- **Dev** (`[dependency-groups].dev`): pytest, pytest-asyncio, ruff, mypy, respx, yamllint.
+- **Dev** (`[dependency-groups].dev`): pytest, pytest-asyncio, ruff, mypy, respx.
 
 Las versiones quedan ancladas en `uv.lock` (commiteado en el repo).
 
