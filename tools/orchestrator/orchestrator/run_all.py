@@ -29,7 +29,7 @@ from .qa_smoke_runner import QASmokeDaemon
 from .recolector import Recolector
 from .reviewer import ReviewerDaemon
 from .spec_writer_runner import SpecWriterDaemon
-from .state_machine import TicketState
+from .state_machine import TicketState, inflight_states
 from .trigger_dispatcher import (
     AgentName,
     ArchitectDecision,
@@ -255,6 +255,76 @@ def _supported_signals() -> list[signal.Signals]:
     return out
 
 
+async def _inflight_story_count(linear: LinearClient) -> int:
+    """Count unfinished Stories across every in-flight state.
+
+    A fully-decomposed phase whose Stories have advanced past ``Backlog`` is
+    still real work, so the Architect trigger must weigh all in-flight states
+    — not just ``Backlog`` — to avoid a spurious run (NSG-49). On any Linear
+    error this returns ``0``; the caller treats that as "looks empty" and the
+    Architect's own cooldown/idempotency keep a transient blip from cascading.
+    """
+    return await linear.count_issues_by_states(
+        [state.value for state in inflight_states()]
+    )
+
+
+async def _trigger_tick(
+    *,
+    settings: Settings,
+    db: Database,
+    linear: LinearClient,
+    claude: ClaudeRunner,
+    log: logging.Logger,
+) -> None:
+    """Evaluate the dispatcher once and run whichever one-shot agents fire."""
+    inflight = 0
+    with contextlib.suppress(Exception):
+        inflight = await _inflight_story_count(linear)
+
+    captured_inflight = inflight
+
+    def _provider(b: int = captured_inflight) -> int:
+        return b
+
+    disp = TriggerDispatcher(
+        settings=settings,
+        db=db,
+        backlog_count_provider=_provider,
+    )
+    for decision in disp.evaluate():
+        if not decision.fire:
+            # AC-4: record *why* the Architect held back so orchestrator.jsonl
+            # distinguishes "work in flight, backlog not exhausted" from a
+            # genuinely empty backlog (the latter fires and is logged by
+            # run_architect). Auditor/Gardener already log their own runs.
+            if isinstance(decision, ArchitectDecision):
+                log.info(
+                    "architect: not firing — %s (threshold=%d)",
+                    decision.reason,
+                    settings.ARCHITECT_BACKLOG_THRESHOLD,
+                )
+            continue
+        if decision.agent == AgentName.ARCHITECT and isinstance(
+            decision, ArchitectDecision
+        ):
+            await architect_mod.run_architect(
+                decision, settings=settings, db=db, claude=claude
+            )
+        elif decision.agent == AgentName.AUDITOR and isinstance(
+            decision, AuditorDecision
+        ):
+            await auditor_mod.run_auditor(
+                decision, settings=settings, db=db, claude=claude
+            )
+        elif decision.agent == AgentName.GARDENER and isinstance(
+            decision, GardenerDecision
+        ):
+            await gardener_mod.run_gardener(
+                decision, settings=settings, db=db, claude=claude
+            )
+
+
 async def _trigger_loop(
     *,
     settings: Settings,
@@ -268,43 +338,13 @@ async def _trigger_loop(
 
     while not stop_event.is_set():
         try:
-            backlog = 0
-            with contextlib.suppress(Exception):
-                backlog = await linear.count_issues_by_state(
-                    TicketState.BACKLOG.value
-                )
-
-            captured_backlog = backlog
-
-            def _provider(b: int = captured_backlog) -> int:
-                return b
-
-            disp = TriggerDispatcher(
+            await _trigger_tick(
                 settings=settings,
                 db=db,
-                backlog_count_provider=_provider,
+                linear=linear,
+                claude=claude,
+                log=log,
             )
-            for decision in disp.evaluate():
-                if not decision.fire:
-                    continue
-                if decision.agent == AgentName.ARCHITECT and isinstance(
-                    decision, ArchitectDecision
-                ):
-                    await architect_mod.run_architect(
-                        decision, settings=settings, db=db, claude=claude
-                    )
-                elif decision.agent == AgentName.AUDITOR and isinstance(
-                    decision, AuditorDecision
-                ):
-                    await auditor_mod.run_auditor(
-                        decision, settings=settings, db=db, claude=claude
-                    )
-                elif decision.agent == AgentName.GARDENER and isinstance(
-                    decision, GardenerDecision
-                ):
-                    await gardener_mod.run_gardener(
-                        decision, settings=settings, db=db, claude=claude
-                    )
         except Exception:
             log.exception("trigger loop tick failed")
         try:

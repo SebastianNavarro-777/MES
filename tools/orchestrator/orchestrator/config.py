@@ -101,7 +101,19 @@ class Settings(BaseSettings):
     AUDITOR_PR_THRESHOLD: int = Field(default=5, ge=1)
     GARDENER_LEARNING_THRESHOLD: int = Field(default=10, ge=1)
     GARDENER_PR_SAFETY_THRESHOLD: int = Field(default=50, ge=1)
-    ARCHITECT_BACKLOG_THRESHOLD: int = Field(default=5, ge=1)
+    ARCHITECT_BACKLOG_THRESHOLD: int = Field(
+        default=5,
+        ge=1,
+        description=(
+            "Fire the Architect when the number of in-flight (unfinished) "
+            "Stories falls below this value. 'In-flight' spans every ticket "
+            "state except Done and Failed, so a fully-decomposed phase whose "
+            "Stories have advanced past Backlog still counts as work and does "
+            "not trigger a spurious Architect run (NSG-49). The name is kept "
+            "for backwards compatibility; the semantics are broader than "
+            "'Backlog' alone."
+        ),
+    )
     AGENT_COOLDOWN_MINUTES: int = Field(default=30, ge=1)
 
     # --- Derived paths ---

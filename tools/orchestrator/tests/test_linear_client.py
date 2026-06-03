@@ -55,6 +55,52 @@ async def test_count_returns_zero_when_no_issues() -> None:
 
 
 @respx.mock
+async def test_count_issues_by_states_sums_across_states() -> None:
+    """A single multi-state query returns the total across all given states."""
+    respx.post(LINEAR_GRAPHQL_URL).mock(
+        return_value=_ok(
+            {"issues": {"nodes": [{"id": str(i)} for i in range(28)]}}
+        )
+    )
+    async with LinearClient("k", "team") as client:
+        n = await client.count_issues_by_states(
+            ["Backlog", "Ready for Agent", "In Progress", "In Review"]
+        )
+    assert n == 28
+
+
+@respx.mock
+async def test_count_issues_by_states_empty_input_skips_request() -> None:
+    """No states → zero, without touching the network."""
+    route = respx.post(LINEAR_GRAPHQL_URL).mock(
+        return_value=_ok({"issues": {"nodes": []}})
+    )
+    async with LinearClient("k", "team") as client:
+        n = await client.count_issues_by_states([])
+    assert n == 0
+    assert route.call_count == 0
+
+
+@respx.mock
+async def test_count_issues_by_states_sends_states_list_in_payload() -> None:
+    captured: dict[str, object] = {}
+
+    def _capture(request: httpx.Request) -> httpx.Response:
+        import json
+
+        captured.update(json.loads(request.content))
+        return _ok({"issues": {"nodes": []}})
+
+    respx.post(LINEAR_GRAPHQL_URL).mock(side_effect=_capture)
+    async with LinearClient("k", "team-xyz") as client:
+        await client.count_issues_by_states(["Backlog", "In Progress"])
+    assert captured["variables"] == {
+        "team": "team-xyz",
+        "states": ["Backlog", "In Progress"],
+    }
+
+
+@respx.mock
 async def test_list_issues_by_state_returns_typed_objects() -> None:
     respx.post(LINEAR_GRAPHQL_URL).mock(
         return_value=_ok(

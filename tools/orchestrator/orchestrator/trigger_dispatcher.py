@@ -57,6 +57,10 @@ class TriggerDecision:
 
 @dataclass(frozen=True)
 class ArchitectDecision(TriggerDecision):
+    # ``backlog_count`` is the count of in-flight (unfinished) Stories — every
+    # ticket state except Done and Failed — NOT just the ``Backlog`` state.
+    # The field name is retained for backwards compatibility; see NSG-49 and
+    # ``state_machine.inflight_states`` for the broadened semantics.
     backlog_count: int = 0
 
 
@@ -185,10 +189,16 @@ class TriggerDispatcher:
         backlog = self._backlog_count_provider()
         threshold = self._settings.ARCHITECT_BACKLOG_THRESHOLD
         if backlog >= threshold:
+            # `backlog` is the in-flight Story count (see ArchitectDecision).
+            # Above threshold means the active phase still has unfinished work
+            # in flight — the backlog is NOT exhausted, so do not fire.
             return ArchitectDecision(
                 agent=AgentName.ARCHITECT,
                 fire=False,
-                reason=f"backlog={backlog} ≥ threshold={threshold}",
+                reason=(
+                    f"in-flight work={backlog} ≥ threshold={threshold}; "
+                    f"backlog not exhausted"
+                ),
                 backlog_count=backlog,
             )
         if not force and self._in_cooldown(
