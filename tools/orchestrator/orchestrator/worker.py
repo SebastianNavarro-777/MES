@@ -21,7 +21,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from .claude_runner import ClaudeRunner
+from .claude_runner import ClaudeRunner, ClaudeRunResult
 from .config import Settings
 from .db import Database
 from .github_client import GitHubClient, PullRequestSummary
@@ -117,11 +117,54 @@ class WorkerPool:
                             result.stderr[-500:],
                         )
                         self._db.record_learning_event("ticket_failed", ticket_id)
+                        await self._comment_failure(
+                            ticket_id, agent_name, result
+                        )
                 finally:
                     await self._workspaces.cleanup(workspace)
                     self._db.remove_work_item(ticket_id)
         finally:
             self._in_flight.discard(ticket_id)
+
+    async def _comment_failure(
+        self, ticket_id: str, agent_name: str, result: ClaudeRunResult
+    ) -> None:
+        """Leave a diagnostic breadcrumb on the Linear ticket when a run fails.
+
+        A non-zero agent exit (a crash, or a timeout → exit code 124)
+        otherwise leaves *no* trace on the ticket: the only record is the
+        warning buried in ``.orchestrator-state/logs/orchestrator.jsonl``,
+        which makes Auditor/Gardener triage slow (you have to grep the JSONL
+        to learn why a ticket stalled). A short comment on the ticket turns
+        that into a one-glance diagnosis.
+
+        Best-effort and fully guarded: a Linear hiccup here must never crash
+        the worker pool or mask the ``ticket_failed`` learning event that was
+        already recorded by the caller.
+        """
+        try:
+            issue = await self._linear.get_issue(ticket_id)
+            if issue is None:
+                return
+            if result.exit_code == 124:
+                reason = (
+                    f"agotó el tiempo límite "
+                    f"(~{result.duration_seconds:.0f}s) y fue terminado"
+                )
+            else:
+                reason = f"salió con código {result.exit_code}"
+            stderr_tail = result.stderr[-800:].strip() or "(sin salida de error)"
+            body = (
+                f"⚠️ El agente `{agent_name}` {reason}; el ticket no avanzó y "
+                f"no se abrió/actualizó ningún PR. Queda fuera de la cola para "
+                f"re-intento o revisión humana.\n\n"
+                f"```\n{stderr_tail}\n```"
+            )
+            await self._linear.add_comment(issue.id, body)
+        except Exception:
+            log.exception(
+                "could not post failure diagnostics for %s", ticket_id
+            )
 
     async def _plan_run(
         self, ticket_id: str

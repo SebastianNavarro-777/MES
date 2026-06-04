@@ -44,6 +44,8 @@ class _Spawn:
 class FakeClaudeRunner:
     spawns: list[_Spawn] = field(default_factory=list)
     next_exit_code: int = 0
+    next_stderr: str = ""
+    next_duration: float = 0.0
     gate: asyncio.Event | None = None
 
     async def run(
@@ -61,8 +63,8 @@ class FakeClaudeRunner:
         return ClaudeRunResult(
             exit_code=self.next_exit_code,
             stdout="",
-            stderr="",
-            duration_seconds=0.0,
+            stderr=self.next_stderr,
+            duration_seconds=self.next_duration,
         )
 
 
@@ -260,6 +262,59 @@ async def test_failed_run_records_learning_event(
     assert len(events) == 1
     assert events[0].event_type == "ticket_failed"
     assert events[0].ticket_id == "NSG-10"
+    assert pool._in_flight == set()
+
+
+@pytest.mark.asyncio
+async def test_timed_out_run_posts_diagnostic_comment_on_ticket(
+    tmp_path: Path, db: Database
+) -> None:
+    """A worker that exits non-zero (here: a timeout → exit 124) must leave a
+    diagnostic breadcrumb on the Linear ticket, not just in the JSONL log, so
+    Auditor/Gardener can triage the stall at a glance."""
+    settings = Settings(WORKTREES_DIR=str(tmp_path / "wt"))
+    db.enqueue("NSG-15", TicketState.READY_FOR_AGENT.value)
+    claude = FakeClaudeRunner(
+        next_exit_code=124,
+        next_stderr="claude run timed out after 1800s",
+        next_duration=1800.0,
+    )
+    workspaces = FakeWorkspaceManager()
+    linear = FakeLinear()
+    pool = _make_pool(settings, db, claude, workspaces, linear=linear)
+
+    await pool.tick()
+
+    # Learning event still recorded (unchanged behaviour).
+    events = db.list_learning_events()
+    assert [e.event_type for e in events] == ["ticket_failed"]
+    # And a diagnostic comment landed on the ticket.
+    assert len(linear.comments) == 1
+    issue_id, body = linear.comments[0]
+    assert issue_id == "uuid-NSG-15"
+    assert "worker" in body  # names the agent that failed
+    assert "tiempo límite" in body  # timeout (exit 124) phrased as a timeout
+    assert pool._in_flight == set()
+
+
+@pytest.mark.asyncio
+async def test_failure_comment_failure_does_not_crash_pool(
+    tmp_path: Path, db: Database
+) -> None:
+    """If Linear is unreachable when posting the diagnostic, the pool must
+    still record the learning event and clear the ticket cleanly."""
+    settings = Settings(WORKTREES_DIR=str(tmp_path / "wt"))
+    db.enqueue("NSG-10", TicketState.READY_FOR_AGENT.value)
+    claude = FakeClaudeRunner(next_exit_code=1)
+    workspaces = FakeWorkspaceManager()
+    # _NoLinear has no get_issue/add_comment → _comment_failure swallows it.
+    pool = _make_pool(settings, db, claude, workspaces)
+
+    await pool.tick()
+
+    events = db.list_learning_events()
+    assert [e.event_type for e in events] == ["ticket_failed"]
+    assert db.list_work_items(state=TicketState.READY_FOR_AGENT.value) == []
     assert pool._in_flight == set()
 
 
