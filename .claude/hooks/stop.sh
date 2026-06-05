@@ -4,10 +4,18 @@
 # Triggered by .claude/settings.json before the agent finishes its turn.
 # Runs the full local pipeline so an agent cannot end a session with the
 # repo in a red state. Steps:
+#   0. regenerate docs/generated/STATE.md and module-map.md (write steps)
 #   1. ruff check .
 #   2. mypy --strict   (uses [tool.mypy] config in pyproject.toml)
 #   3. tools/linters/architecture.py
 #   4. pytest -q
+#
+# Step 0 keeps STATE.md honest: it is rewritten only when the substantive
+# content changed (the timestamp alone never triggers a rewrite), so closing
+# a session that touched the tree regenerates the snapshot with no manual
+# action — making the DoD box "STATE.md regenerated via hook" mechanically
+# true. The generators degrade gracefully (e.g. Linear offline) and only
+# return non-zero on a real generator error.
 #
 # Exit codes:
 #   0 — every check is green
@@ -72,6 +80,11 @@ run_step() {
         failures=$((failures + 1))
     fi
 }
+
+# Step 0: regenerate the auto-generated snapshots (write steps, run first so
+# the freshly generated docs are present for the rest of the pipeline).
+run_step "regenerate STATE.md"     "$PY" -m tools.verification.update_state
+run_step "regenerate module-map"   "$PY" -m tools.verification.dump_module_map
 
 run_step "ruff check"          "$PY" -m ruff check .
 run_step "mypy --strict"       "$PY" -m mypy --strict
