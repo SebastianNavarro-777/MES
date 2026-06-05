@@ -1,0 +1,93 @@
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--surface-overlay);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-4);
+  z-index: 100;
+}
+
+.modal {
+  background: var(--surface-elevated);
+  border-radius: var(--radius);
+  padding: var(--space-6);
+  width: min(540px, 100%);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.25);
+  outline: none;
+}
+
+.modal__title {
+  margin: 0 0 var(--space-4);
+  font-size: var(--text-title);
+}
+
+.modal__transition {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-4);
+}
+
+.modal__state {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.modal__state-label {
+  font-size: var(--text-caption);
+  color: var(--text-muted);
+}
+
+.modal__arrow {
+  font-size: var(--text-title);
+  color: var(--text-muted);
+}
+
+.modal__summary {
+  font-size: var(--text-body-lg);
+  margin: 0 0 var(--space-4);
+}
+
+.modal__error {
+  color: var(--status-critical);
+  font-size: var(--text-body);
+  font-weight: 600;
+  margin: 0 0 var(--space-4);
+}
+
+.modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
+}
+
+.btn {
+  min-height: var(--touch-target-min);
+  min-width: 120px;
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius);
+  border: 1px solid transparent;
+  font-size: var(--text-body-lg);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn--primary {
+  background: var(--status-healthy);
+  color: #ffffff;
+}
+
+.btn--primary:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.btn--secondary {
+  background: var(--surface-card);
+  border-color: var(--border-subtle);
+  color: var(--text-strong);
+}

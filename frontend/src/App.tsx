@@ -1,25 +1,32 @@
-import { useEffect, useState } from "react";
+import {
+  Navigate,
+  RouterProvider,
+  createBrowserRouter,
+} from "react-router-dom";
+import { OrderDetailPage } from "./features/orders/OrderDetailPage";
+import { messages } from "./i18n/es-MX";
 
-// Minimal landing page for the staging skeleton. It reads /healthz so a
-// human (or QA Smoke screenshot) can see backend connectivity at a glance.
-// Real screens arrive with the frontend Stories under NSG-14.
-export default function App() {
-  const [health, setHealth] = useState<string>("checking…");
+const router = createBrowserRouter([
+  {
+    path: "/",
+    // Convenience landing for local dev / E2E; real navigation comes from the
+    // (not-yet-built) orders list screen.
+    element: <Navigate to="/orders/OF-1001" replace />,
+  },
+  {
+    path: "/orders/:orderId",
+    element: <OrderDetailPage />,
+  },
+  {
+    path: "*",
+    element: (
+      <main style={{ padding: "var(--space-6)" }}>
+        <h1>{messages.order.notFound.title}</h1>
+      </main>
+    ),
+  },
+]);
 
-  useEffect(() => {
-    fetch("/healthz")
-      .then((res) => (res.ok ? res.json() : Promise.reject(res.status)))
-      .then((data: { status?: string }) => setHealth(data.status ?? "unknown"))
-      .catch(() => setHealth("unreachable"));
-  }, []);
-
-  return (
-    <main style={{ fontFamily: "system-ui, sans-serif", padding: "2rem" }}>
-      <h1>NSG MES</h1>
-      <p>Staging stand is up.</p>
-      <p>
-        Backend health: <strong data-testid="health-status">{health}</strong>
-      </p>
-    </main>
-  );
+export function App() {
+  return <RouterProvider router={router} />;
 }
