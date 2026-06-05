@@ -8,6 +8,14 @@
 #   2. mypy --strict   (uses [tool.mypy] config in pyproject.toml)
 #   3. tools/linters/architecture.py
 #   4. pytest -q
+#   5. regenerate docs/generated/STATE.md       (write step, NSG-50)
+#   6. regenerate docs/generated/module-map.md  (write step, NSG-50)
+#
+# Steps 5-6 are *write* steps, not verifications: they rewrite the generated
+# docs from the working tree so the DoD box "STATE.md se actualizó
+# automáticamente vía hook" is mechanically true. They degrade gracefully
+# (e.g. Linear unreachable → the Open Questions section is marked unavailable)
+# and only count as a failure if the generator itself errors out.
 #
 # Exit codes:
 #   0 — every check is green
@@ -77,6 +85,13 @@ run_step "ruff check"          "$PY" -m ruff check .
 run_step "mypy --strict"       "$PY" -m mypy --strict
 run_step "architecture linter" "$PY" tools/linters/architecture.py
 run_step "pytest"              "$PY" -m pytest -q
+
+# Write steps: regenerate the auto-generated docs from the working tree.
+# A short --linear-timeout keeps the Stop hook responsive; if Linear is
+# unreachable the generator still exits 0 (the section is marked unavailable),
+# so these never tip the pipeline red on a network outage.
+run_step "regenerate STATE.md"    "$PY" -m tools.verification.update_state --root "$REPO_ROOT" --linear-timeout 4
+run_step "regenerate module-map"  "$PY" -m tools.verification.dump_module_map --root "$REPO_ROOT"
 
 if [ "$failures" -gt 0 ]; then
     echo "" >&2
