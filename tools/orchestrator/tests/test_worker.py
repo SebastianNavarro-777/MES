@@ -52,7 +52,7 @@ class FakeClaudeRunner:
         agent_name: str,
         user_prompt: str,
         workspace: Path,
-        timeout: float = 60 * 30,
+        timeout: float = 60 * 60,
         extra_args: list[str] | None = None,
     ) -> ClaudeRunResult:
         self.spawns.append(_Spawn(agent_name, workspace, user_prompt))
@@ -241,6 +241,35 @@ async def test_overlapping_tick_does_not_double_spawn(
     # Release the gate and let the first run finish.
     gate.set()
     await first
+    assert pool._in_flight == set()
+
+
+@pytest.mark.asyncio
+async def test_cancelled_run_skips_worktree_cleanup(
+    tmp_path: Path, db: Database
+) -> None:
+    """On Ctrl-C the in-flight run is cancelled; the slow worktree cleanup is
+    skipped so shutdown is prompt (startup purge handles the leftover)."""
+    settings = Settings(WORKTREES_DIR=str(tmp_path / "wt"))
+    db.enqueue("NSG-10", TicketState.READY_FOR_AGENT.value)
+    gate = asyncio.Event()
+    claude = FakeClaudeRunner(gate=gate)
+    workspaces = FakeWorkspaceManager()
+    pool = _make_pool(settings, db, claude, workspaces)
+
+    first = asyncio.create_task(pool.tick())
+    for _ in range(1000):
+        if claude.spawns:
+            break
+        await asyncio.sleep(0)
+    assert pool._in_flight == {"NSG-10"}
+
+    first.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await first
+
+    assert workspaces.created == ["NSG-10"]
+    assert workspaces.cleaned == []  # cleanup skipped on cancel
     assert pool._in_flight == set()
 
 

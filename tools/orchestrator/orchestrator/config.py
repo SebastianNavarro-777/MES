@@ -88,14 +88,14 @@ class Settings(BaseSettings):
         ),
     )
     IN_PROGRESS_GRACE_SECONDS: int = Field(
-        default=2700,
+        default=5400,
         ge=60,
         description=(
             "How long a ticket may sit in In Progress before the recovery "
             "daemon treats it as orphaned (a Worker that crashed mid-run) "
             "and re-queues it to Ready for Agent. Must exceed the longest "
             "possible Worker run so a live agent is never yanked — the "
-            "claude_runner timeout is 30 min, so the default is 45 min."
+            "claude_runner timeout is 60 min, so the default is 90 min."
         ),
     )
     AUDITOR_PR_THRESHOLD: int = Field(default=5, ge=1)

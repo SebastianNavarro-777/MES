@@ -45,7 +45,7 @@ class FakeClaudeRunner:
         agent_name: str,
         user_prompt: str,
         workspace: Path,
-        timeout: float = 60 * 30,
+        timeout: float = 60 * 60,
         extra_args: list[str] | None = None,
     ) -> ClaudeRunResult:
         self.runs += 1

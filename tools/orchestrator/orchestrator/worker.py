@@ -102,6 +102,7 @@ class WorkerPool:
                     # Leave the ticket queued so a later tick retries it.
                     return
                 workspace, agent_name, user_prompt = plan
+                cancelled = False
                 try:
                     result = await self._claude.run(
                         agent_name=agent_name,
@@ -117,8 +118,16 @@ class WorkerPool:
                             result.stderr[-500:],
                         )
                         self._db.record_learning_event("ticket_failed", ticket_id)
+                except asyncio.CancelledError:
+                    # Shutdown (Ctrl-C). claude_runner already killed the
+                    # agent tree; skip the slow worktree cleanup so the
+                    # process exits promptly on a SINGLE Ctrl-C. The leftover
+                    # worktree is purged at the next startup.
+                    cancelled = True
+                    raise
                 finally:
-                    await self._workspaces.cleanup(workspace)
+                    if not cancelled:
+                        await self._workspaces.cleanup(workspace)
                     self._db.remove_work_item(ticket_id)
         finally:
             self._in_flight.discard(ticket_id)
