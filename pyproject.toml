@@ -58,7 +58,7 @@ strict = true
 # Workers extend `files` to include `packages` and `apps/<context>` once those
 # directories contain real code. mypy errors when a configured path has no
 # .py files, so we keep the default narrow during bootstrap.
-files = ["tools"]
+files = ["tools", "apps/wip"]
 explicit_package_bases = true
 mypy_path = "."
 exclude = [
@@ -72,7 +72,7 @@ module = ["respx.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
-testpaths = ["tools"]
+testpaths = ["tools", "apps/wip"]
 python_files = ["test_*.py"]
 asyncio_mode = "auto"
 pythonpath = ["."]
