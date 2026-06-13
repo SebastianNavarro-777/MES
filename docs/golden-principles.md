@@ -133,6 +133,20 @@ Each context defines `apps/<context>/domain/exceptions.py` with at minimum a bas
 
 ---
 
+### GP-013: High-risk harness PRs merge only with CI-proven safety on a rebased branch
+
+A PR labeled `high-risk` that modifies a harness pipeline file — the Stop / PostToolUse hooks (`.claude/hooks/*`) or any `tools/verification/*` script those hooks invoke — MUST NOT be merged during ramp-up until: (1) **CI** (not just a local run) demonstrates the hook degrades gracefully — no hang and no failure — when an external dependency (network, Linear, git remote) is unavailable; (2) **CI** demonstrates idempotency — consecutive runs on an unchanged tree produce no spurious diff churn (e.g. timestamp-only rewrites); and (3) the branch is **rebased on `main`** (not `BEHIND`) immediately before the merge.
+
+**Rationale:** harness hooks run on every agent session close, so their blast radius is every future session. A hook that hangs, fails, or dirties the diff would degrade every Worker run. A local green is insufficient evidence for that blast radius — CI must prove both the no-dependency degradation path and the no-churn idempotency before the change lands.
+
+**Example:** NSG-50's PR #23 regenerates `STATE.md` / `module-map.md` via the Stop hook. All mechanical checks passed locally and CI was 9/9, but because the PR is `high-risk` and touches `.claude/hooks/stop.sh`, the merge was gated until CI evidence proved AC-7 (no-network degradation) and no timestamp churn on consecutive runs, and the `BEHIND` branch was rebased on `main`.
+
+**Source:** [NSG-53](https://linear.app/nsg-engineering/issue/NSG-53).
+
+**Enforcement:** Reviewer agent — during ramp-up, blocks the merge of a `high-risk` PR touching harness hook files until the CI logs show the degradation + idempotency evidence and the branch is not `BEHIND` `main`.
+
+---
+
 ## How this file evolves
 
 - The Gardener agent proposes new principles via PR after observing patterns in `Failed` tickets and closed `Harness-Fix`s.
