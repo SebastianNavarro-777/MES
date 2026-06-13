@@ -100,16 +100,32 @@ jobs:
       - name: Pin Python 3.12
         run: uv python install 3.12
 
-      - name: Sync dev environment
-        run: uv sync --frozen
+      - name: Sync runtime-only environment
+        # Runtime deps only (--no-dev): the license gate audits what we
+        # DISTRIBUTE. Dev tools (ruff, mypy, pytest, yamllint, ...) are never
+        # shipped to customers, so they are intentionally out of scope here.
+        run: uv sync --no-dev --frozen
 
-      - name: Reject copyleft licenses
-        # MES is commercial software. Copyleft (AGPL, GPL, LGPL) deps
-        # would contaminate the distribution. MIT/BSD/Apache/MPL are OK.
-        # Customers in regulated industries (21 CFR, IATF) audit this.
-        run: |
-          uv run --with pip-licenses pip-licenses \
-            --fail-on="AGPL-3.0;AGPL-3.0-only;AGPL-3.0-or-later;GPL-3.0;GPL-3.0-only;GPL-3.0-or-later;LGPL-3.0;LGPL-3.0-only;LGPL-3.0-or-later"
+      - name: Reject copyleft licenses (runtime deps only)
+        # MES is commercial, distributed software. Copyleft (AGPL/GPL/LGPL)
+        # licenses in *distributed* (runtime) dependencies would contaminate
+        # the product; MIT/BSD/Apache/MPL are fine. Customers in regulated
+        # industries (21 CFR, IATF) audit this.
+        #
+        # This gate audits RUNTIME deps only — [project].dependencies plus
+        # their transitive closure. Why runtime-only: dev-group tools are
+        # never distributed, so their licenses cannot contaminate the product.
+        # Auditing them produced false positives (e.g. yamllint is
+        # GPL-3.0-or-later but is a purely local/CI linter declared in
+        # [dependency-groups].dev). See NSG-46.
+        #
+        # Scope note: pip-audit (security-audit job) still covers runtime+dev
+        # on purpose — CVEs matter in dev too. Only this license gate narrows.
+        # The copyleft --fail-on list is UNCHANGED; only the audited package
+        # set narrows. tools/linters/license_gate.py derives the runtime set
+        # from `uv export --no-dev` and runs pip-licenses scoped to exactly
+        # those packages.
+        run: uv run --no-dev --with pip-licenses python tools/linters/license_gate.py
 
   build:
     name: Build (placeholder)
