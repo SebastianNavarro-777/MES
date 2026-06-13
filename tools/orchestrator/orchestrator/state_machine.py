@@ -21,6 +21,7 @@ __all__ = [
     "actionable_states",
     "assert_can_transition",
     "can_transition",
+    "inflight_states",
     "terminal_states",
 ]
 
@@ -159,6 +160,20 @@ def assert_can_transition(src: TicketState, dst: TicketState) -> None:
 def terminal_states() -> frozenset[TicketState]:
     """States from which no transition is possible."""
     return frozenset(s for s, dests in ALLOWED_TRANSITIONS.items() if not dests)
+
+
+def inflight_states() -> frozenset[TicketState]:
+    """States that represent unfinished, in-flight work.
+
+    Every state except :attr:`TicketState.DONE` (terminal) and
+    :attr:`TicketState.FAILED` (awaiting recovery, not fresh backlog the
+    Architect should top up). The trigger dispatcher sums issues across
+    these states to gauge real backlog pressure: a Story that has advanced
+    past ``Backlog`` (e.g. into ``Ready for Agent`` or ``In Review``) is
+    still unfinished work, so a fully-decomposed phase must not be misread
+    as "backlog exhausted" and trigger a spurious Architect run (NSG-49).
+    """
+    return frozenset(TicketState) - {TicketState.DONE, TicketState.FAILED}
 
 
 def actionable_states() -> frozenset[TicketState]:

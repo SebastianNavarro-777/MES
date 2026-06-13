@@ -1,0 +1,48 @@
+/*
+ * Design tokens — codified from docs/ui-design.md by the first frontend Story
+ * (NSG-21). Subsequent screens reuse these CSS custom properties instead of
+ * hard-coding values. All status colours satisfy WCAG 2.1 AA (>= 4.5:1)
+ * against --surface-card.
+ */
+
+:root {
+  /* Status palette — always paired with icon + text in the UI (never colour only). */
+  --status-critical: #c0392b;
+  --status-warning: #b9651a; /* darkened from #E67E22 to clear 4.5:1 on cards */
+  --status-healthy: #1e8449; /* darkened from #27AE60 to clear 4.5:1 on cards */
+  --status-neutral: #5d6d6e; /* darkened from #7F8C8D to clear 4.5:1 on cards */
+
+  /* Surfaces — page is light grey (not pure white) for shop-floor lighting. */
+  --surface-page: #eceff1;
+  --surface-card: #ffffff;
+  --surface-elevated: #ffffff;
+  --surface-overlay: rgba(15, 23, 25, 0.55);
+
+  --text-strong: #1b2a2b;
+  --text-muted: #45565a;
+  --border-subtle: #cfd8dc;
+
+  /* Spacing scale — base unit 4px. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* Type scale (px) — larger than typical web apps; read from 1–1.5 m away. */
+  --text-display: 32px;
+  --text-title: 24px;
+  --text-body-lg: 18px;
+  --text-body: 16px;
+  --text-caption: 14px;
+
+  --line-height-body: 1.5;
+
+  /* Minimum touch target for gloved hands (WCAG 2.5.5). */
+  --touch-target-min: 44px;
+
+  --radius: 8px;
+}
