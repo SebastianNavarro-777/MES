@@ -1,0 +1,31 @@
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius);
+  font-size: var(--text-body-lg);
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.status-pill__icon {
+  font-size: 1.1em;
+  line-height: 1;
+}
+
+.status-pill--critical {
+  background: var(--status-critical);
+}
+
+.status-pill--warning {
+  background: var(--status-warning);
+}
+
+.status-pill--healthy {
+  background: var(--status-healthy);
+}
+
+.status-pill--neutral {
+  background: var(--status-neutral);
+}

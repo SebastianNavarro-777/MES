@@ -222,7 +222,7 @@ async def test_stale_in_progress_is_requeued(
         state_ids=_state_ids(),
     )
     daemon = _make_daemon(settings, db, linear)
-    # Age the ticket well past IN_PROGRESS_GRACE_SECONDS (default 45 min).
+    # Age the ticket well past IN_PROGRESS_GRACE_SECONDS (default 90 min).
     db.mark_in_progress_seen("NSG-20", now=datetime.now(UTC) - timedelta(hours=2))
 
     await daemon.tick()

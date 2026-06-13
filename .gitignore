@@ -68,10 +68,17 @@ desktop.ini
 .env
 .env.*
 !.env.example
+# Staging stand env: commit the example template, never the live file.
+!.env.staging.example
 
 # --- Orchestrator runtime state ---
 .orchestrator-state/
 worktrees/
+
+# --- Agent run artefacts (evidence captured by Worker / QA Smoke) ---
+.worker-artefacts/
+.qa-artefacts/
+.playwright-mcp/
 
 # --- Claude Code local settings (per-user permission grants) ---
 .claude/settings.local.json

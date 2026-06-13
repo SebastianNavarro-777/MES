@@ -10,6 +10,7 @@ actually need. Adding a new query is a small, focused PR.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -131,6 +132,31 @@ class LinearClient:
         """
         data = await self._post(
             query, {"team": self._team_id, "state": state_name}
+        )
+        nodes = data.get("issues", {}).get("nodes", [])
+        if not isinstance(nodes, list):
+            raise LinearClientError("issues.nodes is not a list")
+        return len(nodes)
+
+    async def count_issues_by_states(self, state_names: Iterable[str]) -> int:
+        """Number of issues in this team currently in *any* of the given states.
+
+        Used by the trigger dispatcher to gauge real backlog pressure across
+        every in-flight state in a single round-trip, instead of one query
+        per state. An empty ``state_names`` returns ``0`` without a request.
+        """
+        names = list(state_names)
+        if not names:
+            return 0
+        query = """
+        query CountMulti($team: ID!, $states: [String!]!) {
+          issues(
+            filter: { team: { id: { eq: $team } }, state: { name: { in: $states } } }
+          ) { nodes { id } }
+        }
+        """
+        data = await self._post(
+            query, {"team": self._team_id, "states": names}
         )
         nodes = data.get("issues", {}).get("nodes", [])
         if not isinstance(nodes, list):

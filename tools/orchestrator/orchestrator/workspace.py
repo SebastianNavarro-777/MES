@@ -14,11 +14,16 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import shutil
+import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 from .proc_utils import resolve_executable
+
+log = logging.getLogger(__name__)
 
 __all__ = [
     "Workspace",
@@ -126,6 +131,14 @@ class WorkspaceManager:
         metadata. Suppresses errors so a partially-removed or untracked
         leftover never blocks the caller — this is what makes ``create``
         idempotent and ``purge_all`` safe.
+
+        If the directory survives the first delete it is almost always
+        because a process the agent spawned is still holding it open — a
+        Vite dev server + esbuild started for UI evidence are the usual
+        culprits, and on Windows they orphan when the agent exits. We kill
+        whatever lives under the path, then retry the delete. Without this,
+        the leftover dir makes the next ``git worktree add`` fail with
+        "<path> already exists" and the ticket stalls.
         """
         with contextlib.suppress(WorkspaceError):
             await self._git(
@@ -133,8 +146,60 @@ class WorkspaceManager:
             )
         if wt_path.exists():
             shutil.rmtree(wt_path, ignore_errors=True)
+        if wt_path.exists():
+            await self._kill_processes_under(wt_path)
+            for _ in range(3):
+                shutil.rmtree(wt_path, ignore_errors=True)
+                if not wt_path.exists():
+                    break
+                await asyncio.sleep(0.3)
+            if wt_path.exists():
+                log.warning(
+                    "could not fully remove worktree dir %s (still locked?)",
+                    wt_path,
+                )
         with contextlib.suppress(WorkspaceError):
             await self._git("worktree", "prune", cwd=self.repo_root)
+
+    async def _kill_processes_under(self, wt_path: Path) -> None:
+        """Kill any process whose command line / image lives under ``wt_path``.
+
+        Frees a worktree dir held open by an orphaned dev server. Best-effort
+        and never raises: if the lookup tool is missing or matches nothing,
+        the subsequent rmtree retry simply may not succeed.
+        """
+        target = str(wt_path)
+
+        def _run() -> None:
+            try:
+                if sys.platform == "win32":
+                    ps = (
+                        "Get-CimInstance Win32_Process | Where-Object { "
+                        "$_.CommandLine -like $p -or $_.ExecutablePath -like $p "
+                        "} | ForEach-Object { Stop-Process -Id $_.ProcessId "
+                        "-Force -ErrorAction SilentlyContinue }"
+                    )
+                    subprocess.run(
+                        [
+                            "powershell",
+                            "-NoProfile",
+                            "-NonInteractive",
+                            "-Command",
+                            f"$p='*{target}*'; {ps}",
+                        ],
+                        capture_output=True,
+                        timeout=20,
+                    )
+                else:
+                    subprocess.run(
+                        ["pkill", "-9", "-f", target],
+                        capture_output=True,
+                        timeout=20,
+                    )
+            except Exception:
+                pass
+
+        await asyncio.to_thread(_run)
 
     async def purge_all(self) -> int:
         """Remove every worktree dir under ``worktrees_dir``. Returns the count.

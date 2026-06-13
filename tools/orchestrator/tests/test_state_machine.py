@@ -11,6 +11,7 @@ from tools.orchestrator.orchestrator.state_machine import (
     actionable_states,
     assert_can_transition,
     can_transition,
+    inflight_states,
     terminal_states,
 )
 
@@ -106,6 +107,25 @@ def test_invalid_transition_error_carries_src_and_dst() -> None:
 
 def test_terminal_states_only_contains_done() -> None:
     assert terminal_states() == frozenset({TicketState.DONE})
+
+
+def test_inflight_states_excludes_done_and_failed() -> None:
+    """In-flight = every unfinished state; Done and Failed are not in flight."""
+    inflight = inflight_states()
+    assert TicketState.DONE not in inflight
+    assert TicketState.FAILED not in inflight
+    # Stories that advanced past Backlog are still unfinished work.
+    assert inflight == frozenset(
+        {
+            TicketState.BACKLOG,
+            TicketState.SPEC_DRAFT,
+            TicketState.READY_FOR_AGENT,
+            TicketState.IN_PROGRESS,
+            TicketState.BLOCKED,
+            TicketState.IN_REVIEW,
+            TicketState.READY_FOR_QA,
+        }
+    )
 
 
 def test_actionable_states_match_recolector_contract() -> None:
