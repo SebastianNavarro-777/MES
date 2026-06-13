@@ -3,6 +3,7 @@ import type { ManufacturingOrderDto, TransitionRequest } from "../api/orders";
 import { API_BASE } from "../api/client";
 import { getAvailableTransitions } from "../features/orders/orderStatus";
 import { SEED_ORDERS } from "./orders.fixtures";
+import { SEED_WIP_POSITIONS } from "./wip.fixtures";
 
 // In-memory order store backing the mock orders API. It persists for the
 // lifetime of a browser session (so a transition survives a refetch in dev/E2E)
@@ -80,5 +81,16 @@ export const handlers = [
     const updated: ManufacturingOrderDto = { ...order, status: body.target_state };
     store.set(orderId, updated);
     return HttpResponse.json(updated);
+  }),
+
+  // WIP read projection (ADR 0004 / NSG-37). The `wip` context owns this URL and
+  // filters by `order_id`. It never queries `orders` synchronously, so an order
+  // with no positions (or an unknown order) returns 200 with `[]`, never 404.
+  http.get(`${API_BASE}/wip/positions/`, ({ request }) => {
+    const url = new URL(request.url);
+    const orderId = url.searchParams.get("order_id");
+    const positions =
+      orderId === null ? [] : (SEED_WIP_POSITIONS[orderId] ?? []);
+    return HttpResponse.json(positions);
   }),
 ];

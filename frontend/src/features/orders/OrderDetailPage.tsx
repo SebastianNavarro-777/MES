@@ -9,6 +9,7 @@ import { StatusPill } from "./StatusPill";
 import { TransitionConfirmModal } from "./TransitionConfirmModal";
 import { useOrder } from "./useOrder";
 import { useTransitionOrder } from "./useTransitionOrder";
+import { WipPanel } from "../wip/WipPanel";
 import "./OrderDetailPage.css";
 
 export function OrderDetailPage() {
@@ -131,13 +132,10 @@ export function OrderDetailPage() {
         )}
       </section>
 
-      {/* Extension slot for NSG-41 (WIP balances). Kept as a stable container
-          so the WIP panel can mount here without refactoring this screen. */}
-      <section
-        className="order-detail__wip-slot"
-        data-slot="wip-panel"
-        aria-label="Balances de WIP"
-      />
+      {/* Extension slot reserved by NSG-21; the WIP panel (NSG-41) mounts here. */}
+      <div className="order-detail__wip-slot" data-slot="wip-panel">
+        <WipPanel orderId={order.id} />
+      </div>
 
       {pendingTarget !== null && (
         <TransitionConfirmModal
