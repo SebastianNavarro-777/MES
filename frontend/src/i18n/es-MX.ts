@@ -72,4 +72,24 @@ export const messages = {
     confirmSuffix: "",
     cancel: "Cancelar",
   },
+  wip: {
+    heading: "Balances de WIP",
+    subheading: "Inventario en proceso por paso de ruta",
+    /** Prefix for a route step label, e.g. "Paso 2". */
+    routeStepPrefix: "Paso",
+    columns: {
+      routeStep: "Paso de ruta",
+      qtyIn: "Entradas",
+      qtyOut: "Salidas",
+      qtyScrap: "Merma",
+      balance: "Balance",
+    },
+    loading: "Cargando balances de WIP…",
+    empty: "Esta orden todavía no tiene balances de WIP registrados.",
+    error: {
+      title: "No se pudieron cargar los balances de WIP",
+      body: "Ocurrió un error al consultar el inventario en proceso. Reintenta en unos segundos.",
+      retry: "Reintentar",
+    },
+  },
 } as const;
