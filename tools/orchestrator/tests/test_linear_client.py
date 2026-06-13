@@ -101,6 +101,57 @@ async def test_count_issues_by_states_sends_states_list_in_payload() -> None:
 
 
 @respx.mock
+async def test_list_blocker_states_returns_blockers_with_state() -> None:
+    """Only `blocks` inverse-relations count; `related`/`duplicate` ignored."""
+    respx.post(LINEAR_GRAPHQL_URL).mock(
+        return_value=_ok(
+            {
+                "issue": {
+                    "inverseRelations": {
+                        "nodes": [
+                            {
+                                "type": "blocks",
+                                "issue": {
+                                    "identifier": "NSG-21",
+                                    "state": {"name": "Done"},
+                                },
+                            },
+                            {
+                                "type": "blocks",
+                                "issue": {
+                                    "identifier": "NSG-42",
+                                    "state": {"name": "In Review"},
+                                },
+                            },
+                            {
+                                "type": "related",
+                                "issue": {
+                                    "identifier": "NSG-37",
+                                    "state": {"name": "Backlog"},
+                                },
+                            },
+                        ]
+                    }
+                }
+            }
+        )
+    )
+    async with LinearClient("k", "team") as client:
+        blockers = await client.list_blocker_states("NSG-41")
+    assert blockers == {"NSG-21": "Done", "NSG-42": "In Review"}
+
+
+@respx.mock
+async def test_list_blocker_states_empty_when_no_relations() -> None:
+    respx.post(LINEAR_GRAPHQL_URL).mock(
+        return_value=_ok({"issue": {"inverseRelations": {"nodes": []}}})
+    )
+    async with LinearClient("k", "team") as client:
+        blockers = await client.list_blocker_states("NSG-10")
+    assert blockers == {}
+
+
+@respx.mock
 async def test_list_issues_by_state_returns_typed_objects() -> None:
     respx.post(LINEAR_GRAPHQL_URL).mock(
         return_value=_ok(

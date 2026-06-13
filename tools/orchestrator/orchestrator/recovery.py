@@ -19,17 +19,44 @@ import logging
 
 from .linear_client import Issue, LinearClient
 
-__all__ = ["NEEDS_HUMAN_LABEL", "escalate_to_human", "needs_human"]
+__all__ = [
+    "NEEDS_HUMAN_DECISION_LABEL",
+    "NEEDS_HUMAN_LABEL",
+    "escalate_to_human",
+    "is_question",
+    "needs_human",
+]
 
 log = logging.getLogger(__name__)
 
 # Mirrors the canonical label in ``seed/sync_labels.py``.
 NEEDS_HUMAN_LABEL = "needs-human"
 
+# Mirrors the label the Consultant applies to every Question it opens (see
+# ``prompts/consultant.md`` and ``seed/sync_labels.py``). Every Question
+# carries this; ``type:question`` is applied inconsistently, so this is the
+# reliable marker.
+NEEDS_HUMAN_DECISION_LABEL = "needs-human-decision"
+
 
 def needs_human(issue: Issue) -> bool:
     """Whether a ticket has already been escalated to a human."""
     return NEEDS_HUMAN_LABEL in issue.labels
+
+
+def is_question(issue: Issue) -> bool:
+    """Whether ``issue`` is a human-decision Question, not implementable work.
+
+    A Question ticket has no code surface (no ``module:*`` label, no ACs); it
+    exists only so a human can pick an option in Linear. It must never enter
+    the work pipeline: a Worker that dequeues one finds nothing to build and
+    shoves it into ``Blocked`` — which is exactly how *already-answered*
+    Questions (NSG-42, NSG-44) got dragged Done → In Progress → Blocked after
+    the human had resolved them. The recolector skips enqueuing these and the
+    recovery daemon skips re-driving them, so an answered Question stays put
+    and an unanswered one waits untouched until the Consultant Resolver acts.
+    """
+    return NEEDS_HUMAN_DECISION_LABEL in issue.labels
 
 
 async def escalate_to_human(

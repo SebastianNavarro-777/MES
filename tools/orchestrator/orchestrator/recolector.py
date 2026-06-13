@@ -25,6 +25,7 @@ import logging
 
 from .db import Database
 from .linear_client import LinearClient
+from .recovery import is_question
 from .state_machine import TicketState, actionable_states
 
 __all__ = ["Recolector"]
@@ -70,6 +71,13 @@ class Recolector:
         for state in actionable_states():
             issues = await self._linear.list_issues_by_state(state.value)
             for issue in issues:
+                # A Question ticket has no code to implement. Enqueuing one
+                # lets a Worker dequeue it, find nothing to build, and churn
+                # it into Blocked (NSG-42/44). The recolector is the *only*
+                # thing that fills the work queue, so skipping here keeps
+                # Questions out of the Worker pool and Reviewer entirely.
+                if is_question(issue):
+                    continue
                 self._db.enqueue(
                     issue.identifier,
                     state.value,

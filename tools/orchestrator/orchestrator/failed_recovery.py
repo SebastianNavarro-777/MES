@@ -34,7 +34,7 @@ from datetime import UTC, datetime
 from .config import Settings
 from .db import Database
 from .linear_client import Issue, LinearClient
-from .recovery import escalate_to_human, needs_human
+from .recovery import escalate_to_human, is_question, needs_human
 from .state_machine import TicketState
 
 __all__ = ["FailedRecoveryDaemon"]
@@ -94,6 +94,11 @@ class FailedRecoveryDaemon:
     async def _recover_failed_one(self, issue: Issue) -> None:
         if needs_human(issue):
             return
+        # A Question ticket has no code to implement; re-queuing it to Ready
+        # for Agent would feed it to the Worker pool, which then churns it
+        # into Blocked. Leave it alone (NSG-42/44).
+        if is_question(issue):
+            return
         if (
             self._db.get_attempts(issue.identifier, _WORKER_STAGE)
             >= self._settings.MAX_AUTO_RETRIES
@@ -136,6 +141,13 @@ class FailedRecoveryDaemon:
 
     async def _reap_in_progress_one(self, issue: Issue) -> None:
         if needs_human(issue):
+            self._db.clear_in_progress_seen(issue.identifier)
+            return
+        # A Question parked here (it never should be, but an agent can move
+        # it via a raw MCP write) must not be reaped into Ready for Agent —
+        # that is the exact loop that dragged resolved Questions into Blocked
+        # (NSG-42/44). Clear any staleness clock and leave it.
+        if is_question(issue):
             self._db.clear_in_progress_seen(issue.identifier)
             return
         first_seen = self._db.mark_in_progress_seen(issue.identifier)

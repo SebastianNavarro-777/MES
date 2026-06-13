@@ -89,6 +89,33 @@ async def test_actionable_tickets_get_enqueued(db: Database) -> None:
     assert enqueued == ["NSG-10", "NSG-11"]
 
 
+@pytest.mark.asyncio
+async def test_question_tickets_are_not_enqueued(db: Database) -> None:
+    """A `needs-human-decision` Question has no code surface; enqueuing one
+    lets a Worker dequeue it, find nothing to build, and churn it into Blocked
+    (NSG-42/44). Even sitting in an actionable state, it must be skipped while
+    real Stories in the same state are still enqueued."""
+    fake = FakeLinearClient(
+        {
+            "Ready for Agent": [
+                _issue("NSG-50", state="Ready for Agent", labels=("needs-human-decision",)),
+                _issue(
+                    "NSG-51",
+                    state="Ready for Agent",
+                    labels=("type:story", "module:orders"),
+                ),
+            ],
+            "In Review": [
+                _issue("NSG-52", state="In Review", labels=("needs-human-decision",)),
+            ],
+        }
+    )
+    rec = Recolector(linear=cast(LinearClient, fake), db=db)
+    await rec.tick()
+    enqueued = sorted(i.ticket_id for i in db.list_work_items())
+    assert enqueued == ["NSG-51"]  # only the real Story, never the Questions
+
+
 # ---------------------------------------------------------------------------
 # applied-default-decision detection
 # ---------------------------------------------------------------------------

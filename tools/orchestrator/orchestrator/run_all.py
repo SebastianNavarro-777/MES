@@ -18,6 +18,7 @@ from rich.logging import RichHandler
 from . import architect as architect_mod
 from . import auditor as auditor_mod
 from . import gardener as gardener_mod
+from .blocked_recovery import BlockedRecoveryDaemon
 from .claude_runner import ClaudeRunner
 from .config import Settings, repo_root
 from .consultant_resolver import ConsultantResolver
@@ -218,6 +219,9 @@ async def run_all(*, env_overrides: dict[str, Any] | None = None) -> int:
     failed_recovery = FailedRecoveryDaemon(
         settings=settings, db=db, linear=linear
     )
+    blocked_recovery = BlockedRecoveryDaemon(
+        settings=settings, db=db, linear=linear
+    )
 
     try:
         await asyncio.gather(
@@ -228,6 +232,7 @@ async def run_all(*, env_overrides: dict[str, Any] | None = None) -> int:
             consultant.run_forever(stop_event=stop_event),
             spec_writer.run_forever(stop_event=stop_event),
             failed_recovery.run_forever(stop_event=stop_event),
+            blocked_recovery.run_forever(stop_event=stop_event),
             _trigger_loop(
                 settings=settings,
                 db=db,

@@ -1,7 +1,7 @@
 ---
 generated_by: tools/verification/update_state.py
-last_generated_at: 2026-06-05T00:41:32.104857+00:00
-last_updated: 2026-06-05
+last_generated_at: 2026-06-10T01:43:34.219898+00:00
+last_updated: 2026-06-10
 ---
 
 # State snapshot — auto-generated
@@ -17,7 +17,7 @@ last_updated: 2026-06-05
 | Domain entities | 0 |
 | API endpoints | 1 |
 | Domain events defined | 0 |
-| Test functions | 210 |
+| Test functions | 221 |
 | Coverage | n/a |
 
 > Counts reflect the live working tree. `Domain entities`, `Domain events defined` and `Bounded contexts with code` are 0 because the merged work so far is the deployable skeleton (config + `/healthz` + the React bundle); the `apps/*` contexts are scaffolded but carry no domain code yet. `Coverage` is `n/a`: computing it means running the full suite under coverage, which is too slow for a per-session Stop hook — read it from CI (`coverage report`) instead.

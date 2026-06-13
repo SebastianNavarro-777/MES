@@ -213,6 +213,49 @@ class LinearClient:
             raise LinearClientError("issue is not an object")
         return _node_to_issue(node)
 
+    async def list_blocker_states(self, identifier: str) -> dict[str, str]:
+        """Return ``{blocker_identifier: state_name}`` for everything that
+        *blocks* ``identifier`` (its ``blockedBy`` set).
+
+        Linear models a "blocks" relation pointing from the blocker
+        (``issue``) to the blocked ticket (``relatedIssue``). The tickets
+        that block ``identifier`` are therefore the sources of its *inverse*
+        ``blocks`` relations. ``related`` and ``duplicate`` relations are
+        ignored. The blocked-recovery daemon releases a ``Blocked`` ticket
+        once every blocker returned here is ``Done``.
+        """
+        query = """
+        query Blockers($id: String!) {
+          issue(id: $id) {
+            inverseRelations {
+              nodes {
+                type
+                issue { identifier state { name } }
+              }
+            }
+          }
+        }
+        """
+        data = await self._post(query, {"id": identifier})
+        issue = data.get("issue")
+        if not isinstance(issue, dict):
+            return {}
+        nodes = issue.get("inverseRelations", {}).get("nodes", [])
+        if not isinstance(nodes, list):
+            raise LinearClientError("inverseRelations.nodes is not a list")
+        result: dict[str, str] = {}
+        for node in nodes:
+            if not isinstance(node, dict) or node.get("type") != "blocks":
+                continue
+            blocker = node.get("issue")
+            if not isinstance(blocker, dict):
+                continue
+            ident = blocker.get("identifier")
+            state = (blocker.get("state") or {}).get("name")
+            if isinstance(ident, str) and isinstance(state, str):
+                result[ident] = state
+        return result
+
     # -- mutations -----------------------------------------------------------
 
     async def update_issue_state(self, issue_id: str, new_state_id: str) -> None:

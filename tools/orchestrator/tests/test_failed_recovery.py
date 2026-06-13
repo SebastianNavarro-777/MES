@@ -189,6 +189,27 @@ async def test_needs_human_ticket_is_skipped(
 
 
 @pytest.mark.asyncio
+async def test_failed_question_ticket_is_skipped(
+    tmp_path: Path, db: Database
+) -> None:
+    """A Question that somehow landed in Failed must not be re-queued into
+    the Worker pipeline — it has no code to implement, so a Worker would only
+    churn it back into Blocked (NSG-42/44)."""
+    settings = Settings(WORKTREES_DIR=str(tmp_path / "wt"))
+    linear = FakeLinearClient(
+        issues_by_state={
+            "Failed": [_issue("NSG-30", labels=("needs-human-decision",))]
+        },
+        state_ids=_state_ids(),
+    )
+    daemon = _make_daemon(settings, db, linear)
+    await daemon.tick()
+    assert linear.transitions == []
+    assert linear.comments == []
+    assert db.get_attempts("NSG-30", "worker") == 0
+
+
+@pytest.mark.asyncio
 async def test_multiple_failed_tickets_each_recovered(
     tmp_path: Path, db: Database
 ) -> None:
@@ -277,6 +298,30 @@ async def test_stale_in_progress_escalates_after_budget(
     issue_id, label_ids = linear.label_updates[0]
     assert issue_id == "uuid-NSG-20"
     assert "label-needs-human" in label_ids
+
+
+@pytest.mark.asyncio
+async def test_stale_in_progress_question_is_skipped(
+    tmp_path: Path, db: Database
+) -> None:
+    """Orphan recovery must not yank a Question out of In Progress back into
+    Ready for Agent — that is the exact loop that churned resolved Questions
+    (NSG-42, NSG-44) into Blocked after the human had already answered."""
+    settings = Settings(WORKTREES_DIR=str(tmp_path / "wt"))
+    linear = FakeLinearClient(
+        issues_by_state={
+            "In Progress": [_issue("NSG-31", labels=("needs-human-decision",))]
+        },
+        state_ids=_state_ids(),
+    )
+    daemon = _make_daemon(settings, db, linear)
+    db.mark_in_progress_seen("NSG-31", now=datetime.now(UTC) - timedelta(hours=2))
+
+    await daemon.tick()
+
+    assert linear.transitions == []
+    assert linear.comments == []
+    assert db.get_attempts("NSG-31", "worker") == 0
 
 
 @pytest.mark.asyncio
