@@ -13,6 +13,7 @@ We follow [MADR](https://adr.github.io/madr/) (Markdown Any Decision Record) for
 | ID | Title | Status | Date |
 |---|---|---|---|
 | [0001](0001-stack-django-react.md) | Stack: Django + DRF + React + Vite | Accepted | 2026-05-04 |
+| [0002](0002-ramp-up-high-risk-merge-gate.md) | High-risk PRs during ramp-up require explicit human approval before merge | Accepted | 2026-06-13 |
 
 ## Rules
 
